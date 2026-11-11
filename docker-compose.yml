@@ -1,0 +1,64 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: hujjat-tizimi:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DB_PATH: /app/data/app.db
+      APP_TZ: ${APP_TZ:-Asia/Tashkent}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Majburiy sirlar: .env faylida bo'lmasa compose xato bilan to'xtaydi
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env faylida berilishi shart (kamida 32 belgi)}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD .env faylida berilishi shart (kamida 8 belgi)}
+      ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
+      REFRESH_TOKEN_TTL_SEC: ${REFRESH_TOKEN_TTL_SEC:-604800}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-10}
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - app-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "scripts/healthcheck.js"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Docker orqali API'dan token bilan ma'lumot olish:
+  #   docker compose --profile tools run --rm client
+  client:
+    build:
+      context: .
+      target: runtime
+    image: hujjat-tizimi:latest
+    profiles: ["tools"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_URL: http://api:3000/api/v1
+      API_ID: ${API_ID:-admin}
+      API_PASSWORD: ${API_PASSWORD:-${ADMIN_PASSWORD}}
+    command: ["node", "scripts/client-example.js"]
+    read_only: true
+    cap_drop:
+      - ALL
+
+volumes:
+  app-data:
