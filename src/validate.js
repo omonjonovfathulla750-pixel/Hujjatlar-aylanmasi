@@ -52,6 +52,7 @@ function check(schema, v, path, errors, coerce) {
         const p = path ? `${path}.${k}` : k;
         if (!props[k]) {
           if (schema.additionalProperties === false) errors.push({ path: p, message: 'nomaʼlum maydon' });
+          else if (schema.additionalProperties === true) out[k] = x;
           continue;
         }
         if (x === undefined) continue;

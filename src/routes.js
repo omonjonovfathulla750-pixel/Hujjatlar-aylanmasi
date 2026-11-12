@@ -53,13 +53,25 @@ const schemas = {
   }),
   send: obj({ org_id: id }, ['org_id']),
   assign: obj({ user_id: id }, ['user_id']),
-  done: obj({ done_date: { type: 'string', format: 'date', nullable: true } }, ['done_date']),
+  done: obj({
+    done_date: { type: 'string', format: 'date', nullable: true },
+    note: { type: 'string', maxLength: 1000, nullable: true },
+  }, ['done_date']),
   fileUpload: obj({
     filename: { type: 'string', minLength: 1, maxLength: 200 },
     mime_type: { type: 'string', maxLength: 120 },
     data_base64: { type: 'string', minLength: 1, maxLength: MAX_UPLOAD_BODY },
     note: { type: 'string', maxLength: 1000, nullable: true },
   }, ['filename', 'data_base64']),
+  telegramLink: obj({
+    init_data: { type: 'string', maxLength: 8000 },
+    chat_id: { type: 'string', maxLength: 64, nullable: true },
+  }),
+  telegramWebhook: {
+    type: 'object',
+    additionalProperties: true,
+    properties: {},
+  },
   docsQuery: obj({
     q: { type: 'string', maxLength: 100 },
     status: { type: 'string', enum: TASK_STATUSES },
@@ -118,9 +130,9 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     // ---------- tizim ----------
     {
       method: 'GET', path: '/health', auth: false, tags: ['Tizim'], summary: 'Sogʻliq tekshiruvi (healthcheck)',
-      handler() {
+      async handler() {
         let dbOk = false;
-        try { dbOk = repo.ping(); } catch { dbOk = false; }
+        try { dbOk = await repo.ping(); } catch { dbOk = false; }
         const body = { status: dbOk ? 'ok' : 'error', db: dbOk ? 'ok' : 'error', version, uptime_sec: Math.round((Date.now() - startedAt) / 1000) };
         return new Reply(dbOk ? 200 : 503, body);
       },
@@ -186,7 +198,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     },
     {
       method: 'DELETE', path: '/documents/:id', status: 204, roles: ['admin'], tags: ['Hujjatlar'], summary: 'Hujjatni oʻchirish (faqat admin)',
-      handler: ({ params, ctx }) => { svc.deleteDocument(ctx, params.id); return new Reply(204); },
+      async handler({ params, ctx }) { await svc.deleteDocument(ctx, params.id); return new Reply(204); },
     },
     {
       method: 'POST', path: '/documents/:id/sign', tags: ['Hujjatlar'], summary: 'Hujjatni imzolash (faqat imzolovchining oʻzi)',
@@ -201,12 +213,12 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     // ---------- fayllar ----------
     {
       method: 'POST', path: '/documents/:id/files', status: 201, roles: MANAGERS, tags: ['Fayllar'],
-      summary: 'Hujjatga fayl biriktirish (PDF, Word, Excel, rasm)', maxBodyBytes: MAX_UPLOAD_BODY, body: schemas.fileUpload,
+      summary: 'Hujjatga fayl biriktirish (PDF, Word, Excel, rasm)', allowMultipart: true, maxBodyBytes: MAX_UPLOAD_BODY, body: schemas.fileUpload,
       handler: ({ body, params, ctx }) => svc.uploadAttachment(ctx, { docId: params.id, kind: 'document', ...body }),
     },
     {
       method: 'POST', path: '/assignees/:id/files', status: 201, tags: ['Fayllar'],
-      summary: 'Bajarilgan topshiriqqa javob faylini yuklash', maxBodyBytes: MAX_UPLOAD_BODY, body: schemas.fileUpload,
+      summary: 'Bajarilgan topshiriqqa javob faylini yuklash (majburiy tavsif bilan)', allowMultipart: true, maxBodyBytes: MAX_UPLOAD_BODY, body: schemas.fileUpload,
       handler: ({ body, params, ctx }) => svc.uploadAttachment(ctx, { assigneeId: params.id, kind: 'response', ...body }),
     },
     {
@@ -239,7 +251,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     {
       method: 'DELETE', path: '/tasks/:id', status: 204, roles: ['admin'], tags: ['Topshiriqlar'],
       summary: 'Topshiriqni oʻchirish (faqat admin)',
-      handler: ({ params, ctx }) => { svc.deleteTask(ctx, params.id); return new Reply(204); },
+      async handler({ params, ctx }) { await svc.deleteTask(ctx, params.id); return new Reply(204); },
     },
     {
       method: 'POST', path: '/tasks/:id/assignees', status: 201, roles: MANAGERS, tags: ['Topshiriqlar'],
@@ -249,12 +261,12 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     {
       method: 'PATCH', path: '/assignees/:id', tags: ['Topshiriqlar'],
       summary: 'Bajarilgan sanani belgilash yoki bekor qilish (done_date: null)', body: schemas.done,
-      handler: ({ body, params, ctx }) => svc.setDone(ctx, params.id, body.done_date),
+      handler: ({ body, params, ctx }) => svc.setDone(ctx, params.id, body.done_date, body.note),
     },
     {
       method: 'DELETE', path: '/assignees/:id', status: 204, roles: ['admin'], tags: ['Topshiriqlar'],
       summary: 'Xodimga yuklangan vazifani bekor qilish (faqat admin)',
-      handler: ({ params, ctx }) => { svc.deleteAssignee(ctx, params.id); return new Reply(204); },
+      async handler({ params, ctx }) { await svc.deleteAssignee(ctx, params.id); return new Reply(204); },
     },
 
     // ---------- maʼlumotnomalar va hisobotlar ----------
@@ -326,6 +338,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
         code: { type: 'string', minLength: 2, maxLength: 50 },
         password: { type: 'string', minLength: 8, maxLength: 200, trim: false },
         auth_reset_required: { type: 'boolean' },
+        telegram_chat_id: { type: 'string', maxLength: 64, nullable: true },
       }, ['name', 'org_id', 'code', 'password']),
       handler: ({ body, ctx }) => svc.createUserAdmin(ctx, body),
     },
@@ -340,12 +353,13 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
         password: { type: 'string', minLength: 8, maxLength: 200, trim: false },
         active: { type: 'boolean' },
         auth_reset_required: { type: 'boolean' },
+        telegram_chat_id: { type: 'string', maxLength: 64, nullable: true },
       }),
       handler: ({ body, params, ctx }) => svc.updateUserAdmin(ctx, params.id, body),
     },
     {
       method: 'DELETE', path: '/users/:id', status: 204, roles: ['admin'], tags: ['Foydalanuvchilar'], summary: 'Xodimni tizimdan oʻchirish (faqat admin)',
-      handler: ({ params, ctx }) => { svc.deleteUserAdmin(ctx, params.id); return new Reply(204); },
+      async handler({ params, ctx }) { await svc.deleteUserAdmin(ctx, params.id); return new Reply(204); },
     },
 
     // ---- Integratsiyalar ----
@@ -379,6 +393,26 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     {
       method: 'POST', path: '/notifications/read-all', tags: ['Bildirishnomalar'], summary: 'Barcha bildirishnomalarni oʻqilgan deb belgilash',
       handler: ({ user }) => svc.markAllRead(user),
+    },
+
+    // ---- Arxiv va Telegram ----
+    {
+      method: 'GET', path: '/archive', tags: ['Arxiv'], summary: 'Arxivlangan hujjatlar, javob fayllari va iqtiboslar roʻyxati',
+      handler: ({ user }) => svc.listArchive(user),
+    },
+    {
+      method: 'GET', path: '/auth/telegram-link', tags: ['Telegram'], summary: 'Telegram botni shaxsiy profilga bogʻlash havolasi',
+      handler: ({ user }) => svc.getTelegramLink(user),
+    },
+    {
+      method: 'POST', path: '/auth/telegram-link', tags: ['Telegram'], summary: 'Telegram WebApp initData orqali profilni bogʻlash',
+      body: schemas.telegramLink,
+      handler: ({ ctx, body }) => svc.linkTelegram(ctx, body),
+    },
+    {
+      method: 'POST', path: '/telegram/webhook', auth: false, tags: ['Telegram'], summary: 'Telegram Bot Webhook qabul qiluvchisi',
+      maxBodyBytes: 1_000_000, body: schemas.telegramWebhook,
+      handler: ({ body, headers }) => svc.handleTelegramWebhook(body, headers),
     },
 
     // ---- Demo tozalash ----

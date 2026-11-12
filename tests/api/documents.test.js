@@ -4,7 +4,7 @@ import { id, newDoc, setupRoles, startTestApp } from '../helpers.js';
 
 async function env(opts) {
   const t = await startTestApp(opts);
-  setupRoles(t);
+  await setupRoles(t);
   const admin = await t.tokenFor('admin');
   return { t, admin, close: () => t.close() };
 }

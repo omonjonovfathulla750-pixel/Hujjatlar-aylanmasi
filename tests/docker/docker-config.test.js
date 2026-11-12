@@ -75,10 +75,11 @@ test('.env.example: barcha kerakli o‘zgaruvchilar bor va haqiqiy sirlar yo‘q
   assert.match(env, /^ADMIN_PASSWORD=$/m);
 });
 
-test('healthcheck skripti va package.json mavjud; bog‘liqliksiz (zero-dependency)', () => {
+test('healthcheck skripti va package.json mavjud; kerakli cloud/upload bog‘liqliklar ulangan', () => {
   assert.ok(existsSync(new URL('scripts/healthcheck.js', root)));
   const pkg = JSON.parse(read('package.json'));
-  assert.equal(pkg.dependencies, undefined);
+  assert.ok(pkg.dependencies['@libsql/client']);
+  assert.ok(pkg.dependencies.multer);
   assert.equal(pkg.type, 'module');
   assert.match(pkg.engines.node, /22/);
   assert.match(pkg.scripts.test, /node --disable-warning=ExperimentalWarning --test/);

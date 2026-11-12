@@ -68,14 +68,16 @@ export const burnPasswordCheck = (password) => verifyPassword(password, DUMMY_HA
 export function createTokenService({ db, config, now = () => Date.now() }) {
   const secret = config.jwtSecret;
 
-  function issue(user) {
+  async function issue(user) {
     const t = now();
     const jti = randomUUID();
     const access = signJwt({ sub: user.id, role: user.role, typ: 'access' }, secret, { ttlSec: config.accessTtlSec, now: t });
     const refresh = signJwt({ sub: user.id, typ: 'refresh', jti }, secret, { ttlSec: config.refreshTtlSec, now: t });
-    db.prepare('DELETE FROM refresh_tokens WHERE expires_at < ?').run(Math.floor(t / 1000));
-    db.prepare('INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (?,?,?)')
-      .run(jti, user.id, Math.floor(t / 1000) + config.refreshTtlSec);
+    await db.run('DELETE FROM refresh_tokens WHERE expires_at < ?', Math.floor(t / 1000));
+    await db.run(
+      'INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (?,?,?)',
+      jti, user.id, Math.floor(t / 1000) + config.refreshTtlSec,
+    );
     return { access_token: access, refresh_token: refresh, token_type: 'Bearer', expires_in: config.accessTtlSec };
   }
 
@@ -85,24 +87,24 @@ export function createTokenService({ db, config, now = () => Date.now() }) {
 
   // Refresh tokenni almashtiradi (rotation). Allaqachon ishlatilgan token qayta kelsa —
   // o'g'irlangan deb hisoblab, foydalanuvchining barcha refresh tokenlari bekor qilinadi.
-  function rotate(refreshToken, loadUser) {
+  async function rotate(refreshToken, loadUser) {
     const p = verifyJwt(refreshToken, secret, { typ: 'refresh', now: now() });
-    const row = db.prepare('SELECT jti, user_id, revoked FROM refresh_tokens WHERE jti = ?').get(p.jti);
+    const row = await db.get('SELECT jti, user_id, revoked FROM refresh_tokens WHERE jti = ?', p.jti);
     if (!row) throw unauthorized('Refresh token topilmadi', { code: 'invalid_token' });
     if (row.revoked) {
-      db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?').run(row.user_id);
+      await db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', row.user_id);
       throw unauthorized('Refresh token qayta ishlatilgan; qaytadan kiring', { code: 'token_reuse' });
     }
-    db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?').run(p.jti);
-    const user = loadUser(row.user_id);
+    await db.run('UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?', p.jti);
+    const user = await loadUser(row.user_id);
     if (!user || !user.active) throw unauthorized('Foydalanuvchi faol emas', { code: 'invalid_token' });
-    return { user, tokens: issue(user) };
+    return { user, tokens: await issue(user) };
   }
 
-  function revoke(refreshToken) {
+  async function revoke(refreshToken) {
     try {
       const p = verifyJwt(refreshToken, secret, { typ: 'refresh', now: now() });
-      db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?').run(p.jti);
+      await db.run('UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?', p.jti);
       return true;
     } catch (e) {
       if (e instanceof HttpError) return false;
@@ -110,8 +112,8 @@ export function createTokenService({ db, config, now = () => Date.now() }) {
     }
   }
 
-  function revokeAllForUser(userId) {
-    db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?').run(userId);
+  async function revokeAllForUser(userId) {
+    await db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', userId);
   }
 
   return { issue, verifyAccess, rotate, revoke, revokeAllForUser };

@@ -41,16 +41,16 @@ for (const rel of jsFiles) {
   execFileSync(process.execPath, ['--check', join(root, rel)], { stdio: 'pipe' });
 }
 
-const config = loadConfig({ ...process.env, NODE_ENV: 'development', DB_PATH: ':memory:', SEED_DEMO: 'false' });
-const db = openDb(':memory:');
+const config = loadConfig({ ...process.env, NODE_ENV: 'development', DB_PATH: ':memory:', TURSO_DATABASE_URL: '', SEED_DEMO: 'false' });
+const db = await openDb(':memory:');
 try {
-  seedBase(createRepo(db), config);
+  await seedBase(createRepo(db), config);
   const app = createApp({ config, db, version: pkg.version });
   if (!app.routes.length || !Object.keys(app.openapi.paths).length) {
     throw new Error('Marshrutlar yoki OpenAPI sxemasi yaratilmadi');
   }
 } finally {
-  db.close();
+  await db.close();
 }
 
 const buildDir = join(root, 'build');

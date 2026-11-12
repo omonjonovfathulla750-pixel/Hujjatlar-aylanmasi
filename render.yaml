@@ -3,12 +3,14 @@ services:
     name: hujjat-aylanish-tizimi
     runtime: node
     plan: free
-    buildCommand: npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: "10000"
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_PASSWORD
@@ -21,3 +23,13 @@ services:
         value: "true"
       - key: DB_PATH
         value: ./data/app.db
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ARCHIVE_CHAT_ID
+        sync: false
+      - key: APP_URL
+        sync: false

@@ -15,5 +15,9 @@
     "test:coverage": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=80 \"tests/**/*.test.js\"",
     "client": "node scripts/client-example.js",
     "user": "node --disable-warning=ExperimentalWarning scripts/user-admin.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "multer": "^2.5.0"
   }
 }

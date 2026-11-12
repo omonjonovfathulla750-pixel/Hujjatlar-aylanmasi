@@ -23,15 +23,16 @@ export function testConfig(overrides = {}) {
 }
 
 // Test serveri: xotiradagi SQLite + tasodifiy port + boshqariladigan soat.
-export async function startTestApp({ env = {}, demo = false, startAt = '2026-11-07T08:00:00Z', realClock = false } = {}) {
+export async function startTestApp({ env = {}, demo = false, startAt = '2026-11-07T08:00:00Z', realClock = false, telegram = null } = {}) {
   const config = testConfig(env);
-  const db = openDb(':memory:');
+  const db = await openDb(':memory:');
   const repo = createRepo(db);
-  seedBase(repo, config);
+  await seedBase(repo, config);
   const clock = { t: new Date(startAt) };
   const now = realClock ? () => new Date() : () => clock.t;
-  if (demo) seedDemo(db, repo, { today: todayIn(config.tz, now()) });
-  const app = createApp({ config, db, now, version: 'test' });
+  if (demo) await seedDemo(db, repo, { today: todayIn(config.tz, now()) });
+  const userIdMap = new Map((await repo.listUsers()).map((u) => [u.code, u.id]));
+  const app = createApp({ config, db, now, version: 'test', telegram });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
 
@@ -61,18 +62,18 @@ export async function startTestApp({ env = {}, demo = false, startAt = '2026-11-
   }
 
   return {
-    app, db, repo, config, base, clock, api, login, tokenFor,
-    async close() { await app.close(); try { db.close(); } catch { /* allaqachon yopilgan */ } },
+    app, db, repo, config, base, clock, userIdMap, api, login, tokenFor,
+    async close() { await app.close(); try { await db.close(); } catch { /* allaqachon yopilgan */ } },
   };
 }
 
 // Rollar: U001 user, U002 operator, U003 viewer, U004 user, admin
-export function setupRoles(t) {
-  t.repo.setRole(t.repo.userByCode('U002').id, 'operator');
-  t.repo.setRole(t.repo.userByCode('U003').id, 'viewer');
+export async function setupRoles(t) {
+  await t.repo.setRole(id(t, 'U002'), 'operator');
+  await t.repo.setRole(id(t, 'U003'), 'viewer');
 }
 
-export const id = (t, code) => t.repo.userByCode(code).id;
+export const id = (t, code) => t.userIdMap.get(code);
 
 export const newDoc = (over = {}) => ({
   number: `N-${Math.random().toString(36).slice(2, 8)}`,

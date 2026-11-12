@@ -5,7 +5,7 @@ import { id, newDoc, setupRoles, startTestApp } from '../helpers.js';
 
 async function env(opts) {
   const t = await startTestApp(opts);
-  setupRoles(t);
+  await setupRoles(t);
   const admin = await t.tokenFor('admin');
   return { t, admin, close: () => t.close() };
 }
@@ -57,15 +57,21 @@ test('fayl yuklash (hujjat va xodim javob fayli), yuklab olish va RBAC tekshiruv
     assert.equal(up.status, 201);
     assert.equal(up.body.orig_name, 'topshiriq.pdf');
 
-    // Xodim (U001) javob faylini yuklaydi
+    // Xodim (U001) tavsifsiz javob fayli yuklay olmaydi (422), tavsif bilan yuklaydi (201)
     const u1 = await t.tokenFor('U001');
     const respText = Buffer.from('Bajarildi hisobot matni').toString('base64');
+    const noNote = await t.api('POST', `/assignees/${aid}/files`, {
+      token: u1,
+      body: { filename: 'javob.txt', data_base64: respText, note: '   ' },
+    });
+    assert.equal(noNote.status, 422);
     const upResp = await t.api('POST', `/assignees/${aid}/files`, {
       token: u1,
-      body: { filename: 'javob.txt', data_base64: respText },
+      body: { filename: 'javob.txt', data_base64: respText, note: 'Bajarildi hisobot' },
     });
     assert.equal(upResp.status, 201);
     assert.equal(upResp.body.kind, 'response');
+    assert.equal(upResp.body.note, 'Bajarildi hisobot');
 
     // Begona xodim (U004) na faylni ko'ra oladi, na yuklab oladi
     const u4 = await t.tokenFor('U004');
@@ -171,7 +177,7 @@ test('Excel (.xlsx) va Word (.docx) eksporti statistika va barcha topshiriqlarni
     const docDone = (await t.api('POST', '/documents', { token: admin, body: newDoc({ number: 'EXP-1', title: 'Bajarilgan hujjat', deadline: addDays(today, 5), assignee: id(t, 'U001') }) })).body;
     const aidDone = docDone.tasks[0].assignees[0].id;
     const u1Tok = await t.tokenFor('U001');
-    await t.api('POST', `/assignees/${aidDone}/files`, { token: u1Tok, body: { filename: 'hisobot.txt', data_base64: Buffer.from('ok').toString('base64') } });
+    await t.api('POST', `/assignees/${aidDone}/files`, { token: u1Tok, body: { filename: 'hisobot.txt', data_base64: Buffer.from('ok').toString('base64'), note: 'Hisobot matni' } });
 
     await t.api('POST', '/documents', { token: admin, body: newDoc({ number: 'EXP-2', title: 'Jarayondagi hujjat', deadline: addDays(today, 6), assignee: id(t, 'U004') }) });
 
@@ -226,7 +232,7 @@ test('admin xodimni o‘chira oladi (topshiriq/imzo/fayllari bo‘lsa ham), o‘
     // U001 ga topshiriq va imzo biriktiramiz
     const doc = (await t.api('POST', '/documents', { token: admin, body: newDoc({ assignee: u1Id, signers: [u1Id] }) })).body;
     const aid = doc.tasks[0].assignees[0].id;
-    await t.api('POST', `/assignees/${aid}/files`, { token: u1Tok, body: { filename: 'x.txt', data_base64: Buffer.from('ok').toString('base64') } });
+    await t.api('POST', `/assignees/${aid}/files`, { token: u1Tok, body: { filename: 'x.txt', data_base64: Buffer.from('ok').toString('base64'), note: 'Xodim javobi' } });
 
     // Oddiy xodim o'chira olmaydi
     assert.equal((await t.api('DELETE', `/users/${u1Id}`, { token: u1Tok })).status, 403);
@@ -236,7 +242,7 @@ test('admin xodimni o‘chira oladi (topshiriq/imzo/fayllari bo‘lsa ham), o‘
     // Admin U001 ni muammosiz o'chiradi
     const del = await t.api('DELETE', `/users/${u1Id}`, { token: admin });
     assert.equal(del.status, 204);
-    assert.equal(t.repo.userById(u1Id), null);
+    assert.equal(await t.repo.userById(u1Id), null);
     assert.equal((await t.api('DELETE', `/users/${u1Id}`, { token: admin })).status, 404);
   } finally { await close(); }
 });
@@ -247,18 +253,18 @@ test('haqiqiy (production/development) rejimda faqat standart akkauntlar (admin 
   const { seedBase } = await import('../../src/seed.js');
   const { loadConfig } = await import('../../src/config.js');
   const { verifyPassword } = await import('../../src/auth.js');
-  const db = openDb(':memory:');
+  const db = await openDb(':memory:');
   try {
     const repo = createRepo(db);
     const cfg = loadConfig({ NODE_ENV: 'production', JWT_SECRET: 's'.repeat(32), ADMIN_PASSWORD: 'StrongPass123' });
-    seedBase(repo, cfg);
-    assert.equal(repo.countUsers(), 2);
-    assert.equal(repo.userByCode('admin').role, 'admin');
-    assert.equal(verifyPassword('StrongPass123', repo.userByCode('admin').password_hash), true);
-    assert.equal(repo.userByCode('U001').role, 'user');
-    assert.equal(verifyPassword('12345678', repo.userByCode('U001').password_hash), true);
-    assert.equal(repo.userByCode('U002'), null);
-  } finally { db.close(); }
+    await seedBase(repo, cfg);
+    assert.equal(await repo.countUsers(), 2);
+    assert.equal((await repo.userByCode('admin')).role, 'admin');
+    assert.equal(verifyPassword('StrongPass123', (await repo.userByCode('admin')).password_hash), true);
+    assert.equal((await repo.userByCode('U001')).role, 'user');
+    assert.equal(verifyPassword('12345678', (await repo.userByCode('U001')).password_hash), true);
+    assert.equal(await repo.userByCode('U002'), null);
+  } finally { await db.close(); }
 });
 
 test('POST /auth/register-employee: faqat U001 orqali yangi xodim yaratadi, U001 saqlanadi, dublikat login 409', async () => {
@@ -282,7 +288,7 @@ test('POST /auth/register-employee: faqat U001 orqali yangi xodim yaratadi, U001
     assert.equal(res.body.user.onboarding_required, false);
     assert.ok(res.body.user.created_at);
     // U001 o'zgarmagan va faol
-    const u001 = t.repo.userByCode('U001');
+    const u001 = await t.repo.userByCode('U001');
     assert.ok(u001 && u001.active);
     // Yangi login bilan qayta kirish ishlaydi
     const loginNew = await t.api('POST', '/auth/login', { body: { id: 'r_karimov', password: 'Password123' } });
@@ -301,10 +307,11 @@ test('xodim javob fayli yuklashi topshiriqni avtomatik bajarilgan holatga o‘tk
 
     // Admin xodim o'rniga done qo'ya olmaydi va javob fayli yuklay olmaydi
     assert.equal((await t.api('PATCH', `/assignees/${aid}`, { token: admin, body: { done_date: today } })).status, 403);
-    assert.equal((await t.api('POST', `/assignees/${aid}/files`, { token: admin, body: { filename: 'a.txt', data_base64: Buffer.from('x').toString('base64') } })).status, 403);
+    assert.equal((await t.api('POST', `/assignees/${aid}/files`, { token: admin, body: { filename: 'a.txt', data_base64: Buffer.from('x').toString('base64'), note: 'Sinov' } })).status, 403);
 
-    // Xodim javob fayli yuklaydi -> topshiriq avtomatik 'ok' ga o'tadi
-    const up = await t.api('POST', `/assignees/${aid}/files`, { token: u1, body: { filename: 'hisobot.txt', data_base64: Buffer.from('Tayyor hisobot').toString('base64') } });
+    // Xodim tavsifsiz javob yuborsa 422 qaytaradi, tavsif bilan -> topshiriq avtomatik 'ok' ga o'tadi
+    assert.equal((await t.api('POST', `/assignees/${aid}/files`, { token: u1, body: { filename: 'hisobot.txt', data_base64: Buffer.from('Tayyor hisobot').toString('base64') } })).status, 422);
+    const up = await t.api('POST', `/assignees/${aid}/files`, { token: u1, body: { filename: 'hisobot.txt', data_base64: Buffer.from('Tayyor hisobot').toString('base64'), note: 'Bajarildi iqtibos' } });
     assert.equal(up.status, 201);
     const updated = await t.api('GET', `/documents/${doc.id}`, { token: admin });
     assert.equal(updated.body.tasks[0].status, 'ok');
@@ -361,7 +368,7 @@ test('faylni o‘chirish faqat admin uchun; hayot sikli (timeline) vaqtlari haqi
     const u1Tok = await t.tokenFor('U001'); // user
 
     const fDoc = await t.api('POST', `/documents/${doc.id}/files`, { token: admin, body: { filename: 'doc.txt', data_base64: Buffer.from('a').toString('base64') } });
-    const fResp = await t.api('POST', `/assignees/${aid}/files`, { token: u1Tok, body: { filename: 'resp.txt', data_base64: Buffer.from('b').toString('base64') } });
+    const fResp = await t.api('POST', `/assignees/${aid}/files`, { token: u1Tok, body: { filename: 'resp.txt', data_base64: Buffer.from('b').toString('base64'), note: 'Ijro tavsifi' } });
     assert.equal(fDoc.status, 201);
     assert.equal(fResp.status, 201);
 
@@ -424,7 +431,7 @@ test('admin topshiriqni va xodim biriktiruvini bekor qila oladi (DELETE /tasks/:
     const aid1 = doc.tasks[0].assignees[0].id;
     await t.api('POST', `/tasks/${taskId}/assignees`, { token: admin, body: { user_id: u4 } });
     // U001 javob fayli yuklaydi
-    await t.api('POST', `/assignees/${aid1}/files`, { token: u1Tok, body: { filename: 'f.txt', data_base64: Buffer.from('ok').toString('base64') } });
+    await t.api('POST', `/assignees/${aid1}/files`, { token: u1Tok, body: { filename: 'f.txt', data_base64: Buffer.from('ok').toString('base64'), note: 'Javob izohi' } });
 
     // Operator va oddiy xodim o'chira olmaydi (403)
     assert.equal((await t.api('DELETE', `/assignees/${aid1}`, { token: u1Tok })).status, 403);
@@ -517,7 +524,7 @@ test('SMS provayder sozlamalari: parol maskalanadi, saqlash va o‘chirish ishla
       token: admin,
       body: { provider: 'eskiz', api_url: 'https://notify.eskiz.uz/api/message/sms/send', login: 'admin@org.uz', sender: '9999', enabled: false },
     });
-    const rawSaved = t.repo.getIntegration('sms_provider');
+    const rawSaved = await t.repo.getIntegration('sms_provider');
     assert.equal(rawSaved.value.password, 'secret-token');
     assert.equal(rawSaved.value.sender, '9999');
 
@@ -568,7 +575,7 @@ test('fayl tavsifi (note) saqlanadi va hujjatga fayl biriktirilganda xodimga doc
 test('delegate faqat faol oddiy xodimga ruxsat beradi va operator U001 onboarding belgisini ko‘radi', async () => {
   const { t, admin, close } = await env();
   try {
-    const users = t.repo.listUsers();
+    const users = await t.repo.listUsers();
     const emp1 = users.find((u) => u.role === 'user' && u.code !== 'U001');
     const emp2 = users.find((u) => u.role === 'user' && u.code !== 'U001' && u.id !== emp1.id);
     const op = users.find((u) => u.role === 'operator');
@@ -625,7 +632,7 @@ test('integratsiya token maskalash, SSRF bloklash, login registrsizligi, viewed 
       token: admAccess,
       body: { api_url: 'https://api.telegram.org/bot', enabled: true },
     });
-    const rawTg = t.repo.getIntegration('telegram_bot');
+    const rawTg = await t.repo.getIntegration('telegram_bot');
     assert.equal(rawTg.value.token, 'tok-123');
     assert.equal(rawTg.value.bot_token, 'bot-999');
 
@@ -634,7 +641,7 @@ test('integratsiya token maskalash, SSRF bloklash, login registrsizligi, viewed 
     await t.api('GET', `/documents/${doc.id}`, { token: admAccess });
     await t.api('GET', `/documents/${doc.id}`, { token: admAccess });
     await t.api('GET', `/documents/${doc.id}`, { token: admAccess });
-    const viewedEvents = t.repo.listEvents(doc.id).filter((e) => e.event_type === 'viewed' && e.user_id === loginRes.body.user.id);
+    const viewedEvents = (await t.repo.listEvents(doc.id)).filter((e) => e.event_type === 'viewed' && e.user_id === loginRes.body.user.id);
     assert.equal(viewedEvents.length, 1);
 
     // clear-demo joriy admin sessiyasini (refresh_token) saqlab qoladi

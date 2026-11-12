@@ -30,7 +30,7 @@ function browser(base, storage = new Map()) {
     alert: (m) => alerts.push(m),
     location: { reload: () => { state.reloads += 1; } },
     fetch: (u, o) => fetch(base + u, o),
-    console, Date, Intl, Promise, JSON, Math, String, Number, Array, Object, Set, Map, setTimeout, structuredClone, RegExp, isNaN, parseInt,
+    console, Date, Intl, Promise, JSON, Math, String, Number, Array, Object, Set, Map, FormData, Blob, setTimeout, structuredClone, RegExp, isNaN, parseInt,
   };
   const ctx = vm.createContext(sandbox);
   vm.runInContext(code, ctx);
@@ -152,7 +152,7 @@ test('oddiy xodim: "Yangi hujjat" tugmasi, ID ustuni va SMS bo‘limi ko‘rinma
 
 test('admin: ID ustuni va SMS provayder bo‘limi ko‘rinadi (demo SMS navbati yo‘q); operator — ID/SMS provayder yo‘q; viewer — faqat o‘qish', async () => {
   const t = await startTestApp({ demo: true, realClock: true });
-  setupRoles(t); // U002 = operator, U003 = viewer
+  await setupRoles(t); // U002 = operator, U003 = viewer
   try {
     const adm = await openApp(t, 'admin', 'adminpass1');
     await adm.click({ a: 'go', p: 'users' });
@@ -175,7 +175,7 @@ test('admin: ID ustuni va SMS provayder bo‘limi ko‘rinadi (demo SMS navbati 
     assert.ok(!vw.app().includes('Yangi hujjat'));
     assert.match(vw.app(), /Jami topshiriqlar/);
     // viewer hujjat sahifasida o‘zgartirish tugmalarini ko‘rmaydi
-    const doc = t.repo.findDocs()[0];
+    const doc = (await t.repo.findDocs())[0];
     await vw.click({ a: 'doc', id: String(doc.id) });
     const detail = await vw.until((h) => h.includes(`№ ${doc.number}`));
     assert.ok(!detail.includes('data-a="done"') && !detail.includes('data-a="assign"') && !detail.includes('data-a="send"') && !detail.includes('data-a="del-doc"') && !detail.includes('data-a="del-task"'));
@@ -227,7 +227,7 @@ test('bajarildi tugmasi: xodim o‘z topshirig‘ini belgilaydi va holat yangila
   try {
     const admin = await t.tokenFor('admin');
     const today = todayIn('Asia/Tashkent');
-    const u4Id = t.repo.userByCode('U004').id;
+    const u4Id = (await t.repo.userByCode('U004')).id;
     const created = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-DONE', type: 'Xat', org_id: 1, deadline: addDays(today, 3), title: 'Bajarish', assignee: u4Id } });
     const b = await openApp(t, 'U004', 'demopass1');
     await b.click({ a: 'doc', id: String(created.body.id) });
@@ -237,7 +237,7 @@ test('bajarildi tugmasi: xodim o‘z topshirig‘ini belgilaydi va holat yangila
     await b.click({ a: 'done', id: String(aid), v: '1' });
     const after = await b.until((h) => h.includes(`✓ ${today}`));
     assert.match(after, /Vaqtida bajarildi/);
-    assert.equal(t.repo.docById(created.body.id).tasks[0].assignees[0].done_date, today);
+    assert.equal((await t.repo.docById(created.body.id)).tasks[0].assignees[0].done_date, today);
   } finally { await t.close(); }
 });
 
@@ -276,7 +276,7 @@ test('dashboard: alohida filtrlar, xodim statistikasi va admin uchun o‘chirish
     assert.match(dash, /Topshiriqlar va bajarilish holati/);
 
     // Bitta xodimni tanlash (U004)
-    const u4Id = String(t.repo.userByCode('U004').id);
+    const u4Id = String((await t.repo.userByCode('U004')).id);
     await b.click({ a: 'pick-emp', uid: u4Id });
     const empDash = await b.until((h) => h.includes('Barcha xodimlarga qaytish'));
     assert.match(empDash, /Rahimov Jasur/);
@@ -295,7 +295,7 @@ test('bildirishnoma: qo‘ng‘iroqcha ochilganda o‘qilgan bo‘ladi, tavsif b
   try {
     const admin = await t.tokenFor('admin');
     const today = todayIn('Asia/Tashkent');
-    const u4Id = t.repo.userByCode('U004').id;
+    const u4Id = (await t.repo.userByCode('U004')).id;
     const c = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-NTF', type: 'Xat', org_id: 1, deadline: addDays(today, 4), title: 'Bildirishnoma tavsifi', assignee: u4Id } });
     const aid = c.body.tasks[0].assignees[0].id;
 
@@ -314,7 +314,7 @@ test('bildirishnoma: qo‘ng‘iroqcha ochilganda o‘qilgan bo‘ladi, tavsif b
     await u4.click({ a: 'open-notif', doc: String(c.body.id) });
     const docView = await u4.until((h) => h.includes('№ UI-NTF'));
     assert.match(docView, /Javob tavsifi \(majburiy\)/);
-    assert.ok(t.repo.docById(c.body.id).tasks[0].assignees[0].viewed_at);
+    assert.ok((await t.repo.docById(c.body.id)).tasks[0].assignees[0].viewed_at);
 
     // Javob fayli tanlanib tavsif yozilmasa, ogohlantirish chiqadi
     u4.$(`#rf${aid}`).files = [{ name: 'test.txt', size: 10, type: 'text/plain' }];
@@ -402,7 +402,7 @@ test('U001 shablon onboarding: dashboard yashiriladi, yangi xodim ro‘yxatdan o
     assert.match(empDash, /Xodim paneli/);
 
     // 4. U001 shabloni o'zgarmagan va faol; yangi xodim o'z logini bilan qayta kira oladi
-    const u001 = t.repo.userByCode('U001');
+    const u001 = await t.repo.userByCode('U001');
     assert.ok(u001 && u001.active);
     const secondLogin = await openApp(t, 'r_karimov', 'parol1234');
     assert.match(secondLogin.app(), /Salom, Rustam Karimov/);

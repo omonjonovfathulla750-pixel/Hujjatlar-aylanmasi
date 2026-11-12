@@ -1,7 +1,6 @@
 node_modules
 data
 build
-package-lock.json
 .env
 coverage
 *.db

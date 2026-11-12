@@ -54,61 +54,61 @@ test('parol: hesh tasodifiy tuz bilan, tekshiruv to‘g‘ri/noto‘g‘ri', () 
   assert.equal(burnPasswordCheck('x'), false);
 });
 
-function tokenEnv() {
-  const db = openDb(':memory:');
-  db.prepare("INSERT INTO organizations (name) VALUES ('O')").run();
-  db.prepare("INSERT INTO users (name, org_id, role, code) VALUES ('U', 1, 'user', 'U1')").run();
+async function tokenEnv() {
+  const db = await openDb(':memory:');
+  await db.run("INSERT INTO organizations (name) VALUES ('O')");
+  await db.run("INSERT INTO users (name, org_id, role, code) VALUES ('U', 1, 'user', 'U1')");
   const clock = { t: NOW };
   const svc = createTokenService({ db, config: { jwtSecret: SECRET, accessTtlSec: 900, refreshTtlSec: 3600 }, now: () => clock.t });
   const user = { id: 1, role: 'user', active: 1 };
   return { db, svc, clock, user, load: (id) => (id === 1 ? user : null) };
 }
 
-test('token xizmati: issue → verifyAccess', () => {
-  const { svc, user } = tokenEnv();
-  const t = svc.issue(user);
+test('token xizmati: issue → verifyAccess', async () => {
+  const { svc, user } = await tokenEnv();
+  const t = await svc.issue(user);
   assert.equal(t.token_type, 'Bearer');
   assert.equal(t.expires_in, 900);
   assert.equal(svc.verifyAccess(t.access_token).sub, 1);
-  assert.equal(code(() => svc.verifyAccess(t.refresh_token)), 'invalid_token'); // refresh access sifatida ishlamaydi
+  assert.equal(codeSync(() => svc.verifyAccess(t.refresh_token)), 'invalid_token'); // refresh access sifatida ishlamaydi
 });
 
-test('token xizmati: refresh rotation eski tokenni bekor qiladi', () => {
-  const { svc, user, load } = tokenEnv();
-  const t1 = svc.issue(user);
-  const { tokens: t2 } = svc.rotate(t1.refresh_token, load);
+test('token xizmati: refresh rotation eski tokenni bekor qiladi', async () => {
+  const { svc, user, load } = await tokenEnv();
+  const t1 = await svc.issue(user);
+  const { tokens: t2 } = await svc.rotate(t1.refresh_token, load);
   assert.notEqual(t2.refresh_token, t1.refresh_token);
   assert.equal(svc.verifyAccess(t2.access_token).sub, 1);
 });
 
-test('token xizmati: ishlatilgan refresh qayta kelsa — barcha tokenlar bekor (o‘g‘irlik aniqlash)', () => {
-  const { svc, user, load } = tokenEnv();
-  const t1 = svc.issue(user);
-  const { tokens: t2 } = svc.rotate(t1.refresh_token, load);
-  assert.equal(code(() => svc.rotate(t1.refresh_token, load)), 'token_reuse');
-  assert.equal(code(() => svc.rotate(t2.refresh_token, load)), 'token_reuse'); // yangisi ham bekor bo‘lgan
+test('token xizmati: ishlatilgan refresh qayta kelsa — barcha tokenlar bekor (o‘g‘irlik aniqlash)', async () => {
+  const { svc, user, load } = await tokenEnv();
+  const t1 = await svc.issue(user);
+  const { tokens: t2 } = await svc.rotate(t1.refresh_token, load);
+  assert.equal(await code(() => svc.rotate(t1.refresh_token, load)), 'token_reuse');
+  assert.equal(await code(() => svc.rotate(t2.refresh_token, load)), 'token_reuse'); // yangisi ham bekor bo‘lgan
 });
 
-test('token xizmati: logout, muddat va faol bo‘lmagan foydalanuvchi', () => {
-  const { svc, user, load, clock } = tokenEnv();
-  const t = svc.issue(user);
-  assert.equal(svc.revoke(t.refresh_token), true);
-  assert.equal(code(() => svc.rotate(t.refresh_token, load)), 'token_reuse');
-  assert.equal(svc.revoke('garbage'), false);
+test('token xizmati: logout, muddat va faol bo‘lmagan foydalanuvchi', async () => {
+  const { svc, user, load, clock } = await tokenEnv();
+  const t = await svc.issue(user);
+  assert.equal(await svc.revoke(t.refresh_token), true);
+  assert.equal(await code(() => svc.rotate(t.refresh_token, load)), 'token_reuse');
+  assert.equal(await svc.revoke('garbage'), false);
 
-  const t2 = svc.issue(user);
-  assert.equal(code(() => svc.rotate(t2.refresh_token, () => ({ ...user, active: 0 }))), 'invalid_token');
-  const t3 = svc.issue(user);
+  const t2 = await svc.issue(user);
+  assert.equal(await code(() => svc.rotate(t2.refresh_token, () => ({ ...user, active: 0 }))), 'invalid_token');
+  const t3 = await svc.issue(user);
   clock.t += 3601_000;
-  assert.equal(code(() => svc.rotate(t3.refresh_token, load)), 'token_expired');
+  assert.equal(await code(() => svc.rotate(t3.refresh_token, load)), 'token_expired');
 });
 
-test('token xizmati: bazada yo‘q jti rad etiladi; revokeAllForUser ishlaydi', () => {
-  const { svc, user, load, db } = tokenEnv();
-  const t = svc.issue(user);
-  db.prepare('DELETE FROM refresh_tokens').run();
-  assert.equal(code(() => svc.rotate(t.refresh_token, load)), 'invalid_token');
-  const t2 = svc.issue(user);
-  svc.revokeAllForUser(1);
-  assert.equal(code(() => svc.rotate(t2.refresh_token, load)), 'token_reuse');
+test('token xizmati: bazada yo‘q jti rad etiladi; revokeAllForUser ishlaydi', async () => {
+  const { svc, user, load, db } = await tokenEnv();
+  const t = await svc.issue(user);
+  await db.run('DELETE FROM refresh_tokens');
+  assert.equal(await code(() => svc.rotate(t.refresh_token, load)), 'invalid_token');
+  const t2 = await svc.issue(user);
+  await svc.revokeAllForUser(1);
+  assert.equal(await code(() => svc.rotate(t2.refresh_token, load)), 'token_reuse');
 });

@@ -136,10 +136,10 @@ test('faol bo‘lmay qolgan foydalanuvchining tokenlari darhol ishlamay qoladi; 
   try {
     const l = await t.login('U001');
     assert.equal((await t.api('GET', '/documents', { token: l.access_token })).status, 200);
-    t.repo.setRole(t.repo.userByCode('U001').id, 'operator'); // tokenda hali 'user' yozilgan
+    await t.repo.setRole((await t.repo.userByCode('U001')).id, 'operator'); // tokenda hali 'user' yozilgan
     const create = await t.api('POST', '/documents', { token: l.access_token, body: { number: 'R-1', type: 'Xat', org_id: 1, deadline: '2026-12-01', title: 't' } });
     assert.equal(create.status, 201); // rol DB'dan olinadi, tokendan emas
-    t.db.prepare("UPDATE users SET active = 0 WHERE code = 'U001'").run();
+    await t.db.run("UPDATE users SET active = 0 WHERE code = 'U001'");
     assert.equal((await t.api('GET', '/documents', { token: l.access_token })).status, 401);
     assert.equal((await t.api('POST', '/auth/refresh', { body: { refresh_token: l.refresh_token } })).status, 401);
   } finally { await t.close(); }

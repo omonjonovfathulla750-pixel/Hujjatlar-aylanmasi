@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import multer from 'multer';
 import { createTokenService } from './auth.js';
-import { HttpError, Reply, badRequest, forbidden, notFound, unauthorized } from './errors.js';
+import { HttpError, Reply, badRequest, forbidden, notFound, unauthorized, unprocessable } from './errors.js';
 import { createLogger } from './logger.js';
 import { buildOpenApi } from './openapi.js';
 import { createRateLimiter } from './rateLimit.js';
@@ -10,6 +11,7 @@ import { createRepo } from './repo.js';
 import { Router } from './router.js';
 import { buildRoutes } from './routes.js';
 import { createService } from './service.js';
+import { createTelegramService } from './telegram.js';
 import { validateOrThrow } from './validate.js';
 
 const API_PREFIX = '/api/v1';
@@ -51,10 +53,29 @@ function readBody(req, limit) {
   });
 }
 
-export function createApp({ config, db, logger = createLogger({ level: 'silent' }), now = () => new Date(), version = '0.0.0' }) {
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+}).single('file');
+
+function runMemoryUpload(req, res) {
+  return new Promise((resolve, reject) => {
+    memoryUpload(req, res, (err) => {
+      if (!err) return resolve();
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        reject(unprocessable('Fayl hajmi 10 MB dan oshmasligi kerak'));
+        return;
+      }
+      reject(badRequest(err.message || 'Fayl yuklash xatosi'));
+    });
+  });
+}
+
+export function createApp({ config, db, logger = createLogger({ level: 'silent' }), now = () => new Date(), version = '0.0.0', telegram: customTelegram = null }) {
   const repo = createRepo(db);
   const tokens = createTokenService({ db, config, now: () => now().getTime() });
-  const svc = createService({ db, repo, tokens, config, now });
+  const telegram = customTelegram || createTelegramService({ config, logger });
+  const svc = createService({ db, repo, tokens, config, now, telegram });
   const routes = buildRoutes({ svc, repo, version });
   const router = new Router();
   routes.forEach((r) => router.add(r));
@@ -130,7 +151,7 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
     if (method === 'GET' && path === '/openapi.json') return send(res, 200, openapi);
     const vm = /^\/attachments\/view\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(path);
     if ((method === 'GET' || method === 'HEAD') && vm) {
-      const r = svc.serveViewTicket(vm[1]);
+      const r = await svc.serveViewTicket(vm[1]);
       return send(res, r.status, method === 'HEAD' ? Buffer.alloc(0) : r.body, r.headers, true);
     }
 
@@ -146,7 +167,7 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
       const m = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
       if (!m) throw unauthorized('Token kerak', { code: 'missing_token' });
       const payload = tokens.verifyAccess(m[1]);
-      user = repo.userById(payload.sub);
+      user = await repo.userById(payload.sub);
       if (!user || !user.active) throw unauthorized('Foydalanuvchi faol emas', { code: 'invalid_token' });
       state.userId = user.id;
       if (route.roles && !route.roles.includes(user.role)) throw forbidden('Bu amal uchun ruxsat yoʻq');
@@ -155,16 +176,30 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
     // --- so'rov tanasi va query ---
     let body;
     if (method === 'POST' || method === 'PATCH' || method === 'PUT') {
-      const raw = await readBody(req, route.maxBodyBytes ?? config.bodyLimit);
-      if (route.body) {
-        let parsed = {};
-        if (raw.length) {
-          if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) {
-            throw new HttpError(415, 'Content-Type application/json boʻlishi kerak', { code: 'unsupported_media_type' });
-          }
-          try { parsed = JSON.parse(raw.toString('utf8')); } catch { throw badRequest('JSON notoʻgʻri'); }
+      const ct = req.headers['content-type'] || '';
+      if (route.allowMultipart && /^multipart\/form-data\b/i.test(ct)) {
+        await runMemoryUpload(req, res);
+        if (!req.file || !req.file.buffer?.length) {
+          throw unprocessable('Fayl tanlanmadi yoki boʻsh');
         }
-        body = validateOrThrow(route.body, parsed);
+        body = {
+          filename: req.file.originalname || 'fayl',
+          mime_type: req.file.mimetype || 'application/octet-stream',
+          buffer: req.file.buffer,
+          note: req.body?.note != null ? String(req.body.note) : null,
+        };
+      } else {
+        const raw = await readBody(req, route.maxBodyBytes ?? config.bodyLimit);
+        if (route.body) {
+          let parsed = {};
+          if (raw.length) {
+            if (!/^application\/json\b/i.test(ct)) {
+              throw new HttpError(415, 'Content-Type application/json boʻlishi kerak', { code: 'unsupported_media_type' });
+            }
+            try { parsed = JSON.parse(raw.toString('utf8')); } catch { throw badRequest('JSON notoʻgʻri'); }
+          }
+          body = validateOrThrow(route.body, parsed);
+        }
       }
     }
     const query = route.query ? validateOrThrow(route.query, Object.fromEntries(url.searchParams), { coerce: true }) : {};
@@ -175,7 +210,7 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
     }
 
     const ctx = { user, ip: state.ip, reqId: state.reqId };
-    const result = await route.handler({ user, params, query, body, ctx });
+    const result = await route.handler({ user, params, query, body, ctx, headers: req.headers });
     if (result instanceof Reply) return send(res, result.status, result.body, result.headers, result.raw);
     return send(res, route.status ?? 200, result);
   }
@@ -214,6 +249,10 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
       if (req.method === 'OPTIONS') {
         res.writeHead(204, { Allow: 'GET,POST,PATCH,DELETE,OPTIONS' });
         res.end();
+      } else if (req.method === 'GET' && path === '/health') {
+        let dbOk = false;
+        try { dbOk = await repo.ping(); } catch { dbOk = false; }
+        send(res, dbOk ? 200 : 503, { status: dbOk ? 'ok' : 'error', db: dbOk ? 'ok' : 'error', version });
       } else if (path === API_PREFIX || path.startsWith(`${API_PREFIX}/`)) {
         await handleApi(req, res, url, state);
       } else {
@@ -244,7 +283,7 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
   server.headersTimeout = 15_000;
 
   return {
-    server, handle, repo, svc, tokens, openapi, routes,
+    server, handle, repo, svc, tokens, telegram, openapi, routes,
     limiters: { generalLimiter, loginIdLimiter, loginIpLimiter },
     close: () => new Promise((resolve) => { server.close(() => resolve()); server.closeIdleConnections?.(); }),
   };

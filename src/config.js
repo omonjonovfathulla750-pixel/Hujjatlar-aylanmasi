@@ -39,13 +39,25 @@ export function loadConfig(env = process.env) {
   }
 
   const employeePassword = env.EMPLOYEE_PASSWORD ?? (demoPassword || '12345678');
+  const tursoUrl = String(env.TURSO_DATABASE_URL || '').trim();
+  const tursoAuthToken = String(env.TURSO_AUTH_TOKEN || '').trim();
+  const botToken = String(env.BOT_TOKEN || '').trim();
+  const archiveChatId = String(env.ARCHIVE_CHAT_ID || '').trim();
+  const appUrl = String(env.APP_URL || env.RENDER_EXTERNAL_URL || '').trim().replace(/\/+$/, '');
+  const tgWebhookSecret = String(env.TELEGRAM_WEBHOOK_SECRET || '').trim();
 
   return {
     nodeEnv,
     prod,
-    port: int(env.PORT, 3000),
+    port: int(env.PORT, 10000),
     host: env.HOST || '0.0.0.0',
     dbPath: env.DB_PATH || './data/app.db',
+    tursoUrl,
+    tursoAuthToken,
+    botToken,
+    archiveChatId,
+    appUrl,
+    tgWebhookSecret,
     tz: env.APP_TZ || 'Asia/Tashkent',
     logLevel: env.LOG_LEVEL || 'info',
     jwtSecret,

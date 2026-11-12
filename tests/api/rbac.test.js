@@ -32,7 +32,7 @@ test('ochiq endpointlar tokensiz ishlaydi', async () => {
 
 test('rollar matritsasi: kim nima qila oladi', async () => {
   const t = await startTestApp();
-  setupRoles(t);
+  await setupRoles(t);
   try {
     const tok = {};
     for (const [role, code] of Object.entries(ROLES)) tok[role] = await t.tokenFor(code);
@@ -66,7 +66,7 @@ test('rollar matritsasi: kim nima qila oladi', async () => {
 
 test('viewer hamma narsani ko‘radi, lekin hech narsani o‘zgartira olmaydi', async () => {
   const t = await startTestApp({ demo: true });
-  setupRoles(t);
+  await setupRoles(t);
   try {
     const viewer = await t.tokenFor('U003');
     const admin = await t.tokenFor('admin');
@@ -81,7 +81,7 @@ test('viewer hamma narsani ko‘radi, lekin hech narsani o‘zgartira olmaydi', 
 
 test('ID kodlarini (users.code) faqat admin ko‘radi; parol hesh hech kimga ko‘rinmaydi', async () => {
   const t = await startTestApp();
-  setupRoles(t);
+  await setupRoles(t);
   try {
     for (const [role, code] of Object.entries(ROLES)) {
       const r = await t.api('GET', '/users', { token: await t.tokenFor(code) });
@@ -96,7 +96,7 @@ test('ID kodlarini (users.code) faqat admin ko‘radi; parol hesh hech kimga ko�
 
 test('/data (UI uchun): oddiy xodim faqat o‘z hujjatlarini, SMS ni faqat admin/operator oladi', async () => {
   const t = await startTestApp({ demo: true });
-  setupRoles(t);
+  await setupRoles(t);
   try {
     const admin = (await t.api('GET', '/data', { token: await t.tokenFor('admin') })).body;
     const user = (await t.api('GET', '/data', { token: await t.tokenFor('U001') })).body;

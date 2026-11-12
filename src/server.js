@@ -12,17 +12,27 @@ const logger = createLogger({ level: config.logLevel });
 config.warnings.forEach((w) => logger.warn(w));
 
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const db = openDb(config.dbPath);
+const db = await openDb(config);
 const repo = createRepo(db);
-seedBase(repo, config);
+await seedBase(repo, config);
 if (config.seedDemo) {
-  const n = seedDemo(db, repo, { today: todayIn(config.tz) });
+  const n = await seedDemo(db, repo, { today: todayIn(config.tz) });
   if (n) logger.info('demo_seeded', { documents: n });
 }
 
 const app = createApp({ config, db, logger, version });
 app.server.listen(config.port, config.host, () => {
-  logger.info('server_started', { port: config.port, env: config.nodeEnv, db: config.dbPath, version });
+  logger.info('server_started', {
+    port: config.port,
+    env: config.nodeEnv,
+    db: config.tursoUrl ? 'turso' : config.dbPath,
+    telegram: app.telegram.hasBot(),
+    archive: app.telegram.hasArchive(),
+    version,
+  });
+  app.telegram.setWebhook().catch((e) => {
+    logger.warn('telegram_webhook_failed', { error: e?.message || String(e) });
+  });
 });
 
 let closing = false;
@@ -32,7 +42,7 @@ async function shutdown(signal) {
   logger.info('shutting_down', { signal });
   const timer = setTimeout(() => process.exit(1), 10_000).unref();
   await app.close();
-  db.close();
+  await db.close();
   clearTimeout(timer);
   process.exit(0);
 }
