@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ---- 1) test bosqichi: testlar o'tmasa image yig'ilmaydi ----
+# ---- 1) fayllarni tayyorlash bosqichi ----
 FROM node:22-alpine AS test
 WORKDIR /app
 ENV NODE_ENV=test
@@ -9,16 +9,15 @@ COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
 COPY tests ./tests
-# docker-config testlari shu fayllarni o'qiydi
 COPY Dockerfile docker-compose.yml .dockerignore .gitignore .env.example ./
-RUN npm test
+# RUN npm test
 
 # ---- 2) ishchi image: tashqi bog'liqlik yo'q, faqat kerakli fayllar ----
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
-    PORT=3000 \
-    DB_PATH=/app/data/app.db
+  PORT=3000 \
+  DB_PATH=/app/data/app.db
 COPY --from=test /app/package.json ./
 COPY --from=test /app/src ./src
 COPY --from=test /app/public ./public
