@@ -5,11 +5,12 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../../', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../../', import.meta.url));
 const NODE = ['--disable-warning=ExperimentalWarning'];
 const PORT = 3400 + Math.floor(Math.random() * 400);
-const baseEnv = { PATH: process.env.PATH, NODE_ENV: 'production', JWT_SECRET: 'e'.repeat(48), ADMIN_PASSWORD: 'e2e-admin-pass', SEED_DEMO: 'true', DEMO_PASSWORD: 'e2e-demo-pass', PORT: String(PORT), LOG_LEVEL: 'info' };
+const baseEnv = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, NODE_ENV: 'production', JWT_SECRET: 'e'.repeat(48), ADMIN_PASSWORD: 'e2e-admin-pass', SEED_DEMO: 'true', DEMO_PASSWORD: 'e2e-demo-pass', PORT: String(PORT), LOG_LEVEL: 'info' };
 
 async function waitHealthy(port, ms = 8000) {
   const end = Date.now() + ms;
@@ -21,7 +22,7 @@ async function waitHealthy(port, ms = 8000) {
 }
 
 function start(env) {
-  const child = spawn('node', [...NODE, 'src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [...NODE, 'src/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -35,12 +36,12 @@ test('server jarayoni: ishga tushadi, healthcheck skripti 0 qaytaradi, client sk
   try {
     assert.ok(await waitHealthy(PORT), `server ishga tushmadi:\n${srv.logs()}`);
 
-    const hc = spawnSync('node', ['scripts/healthcheck.js'], { cwd: root, env: { PATH: process.env.PATH, PORT: String(PORT) } });
+    const hc = spawnSync(process.execPath, ['scripts/healthcheck.js'], { cwd: root, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, PORT: String(PORT) } });
     assert.equal(hc.status, 0);
 
-    const client = spawnSync('node', ['scripts/client-example.js'], {
+    const client = spawnSync(process.execPath, ['scripts/client-example.js'], {
       cwd: root, encoding: 'utf8',
-      env: { PATH: process.env.PATH, API_URL: `http://127.0.0.1:${PORT}/api/v1`, API_ID: 'admin', API_PASSWORD: 'e2e-admin-pass' },
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, API_URL: `http://127.0.0.1:${PORT}/api/v1`, API_ID: 'admin', API_PASSWORD: 'e2e-admin-pass' },
     });
     assert.equal(client.status, 0, client.stderr);
     assert.match(client.stdout, /Server holati: ok/);
@@ -48,19 +49,23 @@ test('server jarayoni: ishga tushadi, healthcheck skripti 0 qaytaradi, client sk
     assert.match(client.stdout, /Hujjatlar: jami \d+ ta/);
     assert.match(client.stdout, /Statistika: jami \d+/);
 
-    const wrong = spawnSync('node', ['scripts/client-example.js'], {
+    const wrong = spawnSync(process.execPath, ['scripts/client-example.js'], {
       cwd: root, encoding: 'utf8',
-      env: { PATH: process.env.PATH, API_URL: `http://127.0.0.1:${PORT}/api/v1`, API_ID: 'admin', API_PASSWORD: 'notogri-parol' },
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, API_URL: `http://127.0.0.1:${PORT}/api/v1`, API_ID: 'admin', API_PASSWORD: 'notogri-parol' },
     });
     assert.equal(wrong.status, 1);
     assert.match(wrong.stderr, /401/);
 
     srv.child.kill('SIGTERM');
-    const { code } = await srv.exited;
-    assert.equal(code, 0, srv.logs());
-    assert.match(srv.logs(), /shutting_down/);
+    const { code, sig } = await srv.exited;
+    if (process.platform === 'win32') {
+      assert.equal(sig, 'SIGTERM');
+    } else {
+      assert.equal(code, 0, srv.logs());
+      assert.match(srv.logs(), /shutting_down/);
+    }
     // yopilgandan keyin healthcheck 1 qaytaradi
-    const hc2 = spawnSync('node', ['scripts/healthcheck.js'], { cwd: root, env: { PATH: process.env.PATH, PORT: String(PORT) } });
+    const hc2 = spawnSync(process.execPath, ['scripts/healthcheck.js'], { cwd: root, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, PORT: String(PORT) } });
     assert.equal(hc2.status, 1);
   } finally {
     srv.child.kill('SIGKILL');
@@ -104,7 +109,7 @@ test('production: JWT_SECRET/ADMIN_PASSWORD yo‘q bo‘lsa server ishga tushmay
   for (const missing of ['JWT_SECRET', 'ADMIN_PASSWORD']) {
     const env = { ...baseEnv, SEED_DEMO: 'false', DB_PATH: ':memory:' };
     delete env[missing];
-    const r = spawnSync('node', [...NODE, 'src/server.js'], { cwd: root, env, encoding: 'utf8', timeout: 8000 });
+    const r = spawnSync(process.execPath, [...NODE, 'src/server.js'], { cwd: root, env, encoding: 'utf8', timeout: 8000 });
     assert.notEqual(r.status, 0, missing);
     assert.match(r.stderr, new RegExp(missing));
   }
@@ -127,7 +132,7 @@ test('so‘rov loglari JSON, token va parol logga tushmaydi', async () => {
     const reqs = lines.filter((l) => l.msg === 'request');
     assert.ok(reqs.length >= 3);
     assert.ok(reqs.every((l) => l.reqId && l.method && l.path && l.status && typeof l.ms === 'number'));
-    assert.ok(reqs.some((l) => l.path === '/api/v1/documents' && l.user === 9)); // kim so‘ragani yoziladi
+    assert.ok(reqs.some((l) => l.path === '/api/v1/documents' && l.user === r.user.id)); // kim so‘ragani yoziladi
     assert.ok(!logs.includes('e2e-admin-pass'));
     assert.ok(!logs.includes(r.access_token) && !logs.includes(r.refresh_token));
     assert.ok(!logs.includes('maxfiy-qidiruv')); // query string yozilmaydi

@@ -12,7 +12,10 @@ export function buildOpenApi(routes, { version = '1.0.0' } = {}) {
     const oasPath = r.path.replace(/:([a-zA-Z_]+)/g, '{$1}');
     const parameters = [];
     for (const k of r.keys ?? [...r.path.matchAll(/:([a-zA-Z_]+)/g)].map((m) => m[1])) {
-      parameters.push({ name: k, in: 'path', required: true, schema: { type: 'integer', minimum: 1 } });
+      const schema = k === 'key'
+        ? { type: 'string', enum: ['sms_provider', 'doc_system', 'email_provider', 'telegram_bot'] }
+        : { type: 'integer', minimum: 1 };
+      parameters.push({ name: k, in: 'path', required: true, schema });
     }
     for (const [name, schema] of Object.entries(r.query?.properties ?? {})) {
       parameters.push({ name, in: 'query', required: false, schema: toOpenApiSchema(schema) });
@@ -43,7 +46,7 @@ export function buildOpenApi(routes, { version = '1.0.0' } = {}) {
     info: {
       title: 'Hujjat aylanish tizimi API',
       version,
-      description: 'Admin paneli integratsiyasi uchun REST API. Avtorizatsiya: `POST /auth/login` → `Authorization: Bearer <access_token>`.',
+      description: 'Admin paneli integratsiyasi uchun REST API. Avtorizatsiya: `POST /auth/login` → `Authorization: Bearer <access_token>`. Qoʻshimcha tizim marshrutlari: `GET /openapi.json` va bir martalik koʻrish chiptasi `GET /attachments/view/{ticket}`.',
     },
     servers: [{ url: '/api/v1' }],
     paths,

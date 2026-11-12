@@ -69,11 +69,12 @@ export function createRepo(db) {
   return {
     // ---- foydalanuvchilar / tashkilotlar ----
     userByCode: (code) => plain(db.prepare('SELECT * FROM users WHERE code = ?').get(code)),
+    userByCodeIgnoreCase: (code) => plain(db.prepare('SELECT * FROM users WHERE LOWER(code) = LOWER(?)').get(code)),
     userById: (id) => plain(db.prepare('SELECT * FROM users WHERE id = ?').get(id)),
-    listUsers: () => plainAll(db.prepare('SELECT id, name, org_id, department, pos, role, code, active, must_change_password FROM users ORDER BY id').all()),
+    listUsers: () => plainAll(db.prepare('SELECT id, name, org_id, department, pos, role, code, active, must_change_password, created_at FROM users ORDER BY id').all()),
     countUsers: () => db.prepare('SELECT COUNT(*) n FROM users').get().n,
-    insertUser: (u) => Number(db.prepare('INSERT INTO users (name, org_id, department, pos, role, code, password_hash, must_change_password) VALUES (?,?,?,?,?,?,?,?)')
-      .run(u.name, u.org_id, u.department ?? null, u.pos ?? null, u.role, u.code, u.password_hash ?? null, u.must_change_password ? 1 : 0).lastInsertRowid),
+    insertUser: (u) => Number(db.prepare('INSERT INTO users (name, org_id, department, pos, role, code, password_hash, must_change_password, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(u.name, u.org_id, u.department ?? null, u.pos ?? null, u.role, u.code, u.password_hash ?? null, u.must_change_password ? 1 : 0, u.created_at ?? new Date().toISOString()).lastInsertRowid),
     setPassword: (id, hash, mustChange = 0) => db.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?').run(hash, mustChange ? 1 : 0, id).changes,
     setRole: (id, role) => db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id).changes,
     setActive: (id, active) => db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active ? 1 : 0, id).changes,
@@ -187,6 +188,7 @@ export function createRepo(db) {
 
     // ---- doc_events (hayot sikli) ----
     insertEvent: (e) => Number(db.prepare('INSERT INTO doc_events (doc_id, user_id, event_type, details, created_at) VALUES (?,?,?,?,?)').run(e.doc_id, e.user_id ?? null, e.event_type, e.details ? JSON.stringify(e.details) : null, e.created_at).lastInsertRowid),
+    hasEvent: (docId, userId, eventType) => Boolean(db.prepare('SELECT 1 FROM doc_events WHERE doc_id = ? AND user_id = ? AND event_type = ? LIMIT 1').get(docId, userId, eventType)),
     listEvents: (docId) => plainAll(db.prepare('SELECT e.*, u.name as user_name FROM doc_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.doc_id = ? ORDER BY e.id').all(docId))
       .map((r) => ({ ...r, details: r.details ? JSON.parse(r.details) : null })),
 

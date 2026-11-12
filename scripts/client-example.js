@@ -2,6 +2,8 @@
 // Ishga tushirish:
 //   node scripts/client-example.js
 //   docker compose --profile tools run --rm client
+import { pathToFileURL } from 'node:url';
+
 const API = (process.env.API_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '');
 const ID = process.env.API_ID || 'admin';
 const PASSWORD = process.env.API_PASSWORD || '';
@@ -36,6 +38,6 @@ export async function run(log = console.log) {
 }
 
 // Faqat to'g'ridan-to'g'ri ishga tushirilganda bajariladi (import qilinganda emas)
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((e) => { console.error('Xato:', e.message); process.exit(1); });
 }

@@ -3,9 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-const has = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0;
-const enabled = has && process.env.SKIP_DOCKER_RUNTIME !== '1';
-const skip = enabled ? false : 'docker compose topilmadi (yoki SKIP_DOCKER_RUNTIME=1) — bu testni Docker o‘rnatilgan mashinada ishga tushiring';
+const hasCli = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0;
+const hasDaemon = hasCli && spawnSync('docker', ['info'], { encoding: 'utf8' }).status === 0;
+const enabled = hasDaemon && process.env.SKIP_DOCKER_RUNTIME !== '1';
+const skip = enabled ? false : 'docker compose/daemon ishlamayapti (yoki SKIP_DOCKER_RUNTIME=1) — bu testni Docker ishlayotgan mashinada ishga tushiring';
 
 const env = { ...process.env, JWT_SECRET: 'd'.repeat(48), ADMIN_PASSWORD: 'docker-test-pass', SEED_DEMO: 'true', DEMO_PASSWORD: 'docker-demo-pass', PORT: '3999', COMPOSE_PROJECT_NAME: 'hujjat-test' };
 const dc = (...args) => spawnSync('docker', ['compose', ...args], { cwd: new URL('../../', import.meta.url), env, encoding: 'utf8' });

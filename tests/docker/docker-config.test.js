@@ -37,9 +37,9 @@ test('Dockerfile: sirlar image ichiga yozilmaydi', () => {
 });
 
 test('.dockerignore: .env, baza va git image ichiga tushmaydi', () => {
-  const ign = read('.dockerignore').split('\n');
+  const ign = read('.dockerignore').split(/\r?\n/).map((s) => s.trim());
   for (const x of ['.env', 'data', '.git', 'node_modules']) assert.ok(ign.includes(x), x);
-  assert.ok(read('.gitignore').split('\n').includes('.env'));
+  assert.ok(read('.gitignore').split(/\r?\n/).map((s) => s.trim()).includes('.env'));
 });
 
 test('compose: api servisi — healthcheck, volume, majburiy sirlar, cheklangan huquqlar', () => {

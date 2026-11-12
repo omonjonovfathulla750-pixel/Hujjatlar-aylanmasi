@@ -31,6 +31,39 @@ test('seedBase: DEMO_PASSWORD yo‘q bo‘lsa oddiy xodimlar kira olmaydi; admin
   assert.ok(repo.userByCode('admin').password_hash);
 });
 
+test('seedBase: development rejimida admin va U001 12345678 paroli bilan yaratiladi (mavjud bazaga ham U001 qo‘shiladi)', async () => {
+  const { loadConfig } = await import('../../src/config.js');
+  const { repo } = mk();
+  const devCfg = loadConfig({ NODE_ENV: 'development' });
+  seedBase(repo, devCfg);
+  assert.equal(repo.countUsers(), 2);
+  assert.equal(verifyPassword('12345678', repo.userByCode('admin').password_hash), true);
+  assert.equal(verifyPassword('12345678', repo.userByCode('U001').password_hash), true);
+
+  // Eski bazada faqat admin bo'lsa ham U001 qo'shiladi
+  const { repo: repo2 } = mk();
+  repo2.insertOrg('Ichki ishlar vazirligi');
+  repo2.insertUser({ name: 'Administrator', org_id: 1, pos: 'Admin', role: 'admin', code: 'admin', password_hash: repo.userByCode('admin').password_hash });
+  seedBase(repo2, devCfg);
+  assert.equal(repo2.countUsers(), 2);
+  assert.equal(verifyPassword('12345678', repo2.userByCode('U001').password_hash), true);
+
+  // Ko'p foydalanuvchisi bor mavjud bazada ham U001 yaratiladi va admin/U001 qayta faollashtiriladi
+  const { repo: repo3 } = mk();
+  repo3.insertOrg('Ichki ishlar vazirligi');
+  const admId = repo3.insertUser({ name: 'Administrator', org_id: 1, pos: 'Admin', role: 'admin', code: 'admin', password_hash: repo.userByCode('admin').password_hash });
+  repo3.insertUser({ name: 'Xodim 2', org_id: 1, pos: 'Mutaxassis', role: 'user', code: 'U002', password_hash: repo.userByCode('U001').password_hash });
+  repo3.insertUser({ name: 'Xodim 3', org_id: 1, pos: 'Mutaxassis', role: 'user', code: 'U003', password_hash: repo.userByCode('U001').password_hash });
+  repo3.setActive(admId, false);
+  seedBase(repo3, devCfg);
+  assert.equal(repo3.userByCode('admin').active, 1);
+  assert.equal(repo3.userByCode('U001').active, 1);
+  assert.equal(verifyPassword('12345678', repo3.userByCode('U001').password_hash), true);
+  repo3.setActive(repo3.userByCode('U001').id, false);
+  seedBase(repo3, devCfg);
+  assert.equal(repo3.userByCode('U001').active, 1);
+});
+
 test('seedDemo: deterministik, qayta ishlatilganda yangi hujjat qo‘shmaydi', () => {
   const run = () => { const { db, repo } = mk(); seedBase(repo, testConfig()); const n = seedDemo(db, repo, { today: '2026-11-07' }); return { n, repo, db }; };
   const a = run();

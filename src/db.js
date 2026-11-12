@@ -145,6 +145,10 @@ export const MIGRATIONS = [
   ALTER TABLE attachments ADD COLUMN note TEXT;
   ALTER TABLE notifications ADD COLUMN doc_id INTEGER REFERENCES documents(id) ON DELETE CASCADE;
   `,
+  `
+  ALTER TABLE users ADD COLUMN created_at TEXT;
+  UPDATE users SET created_at = date('now') WHERE created_at IS NULL;
+  `,
 ];
 
 export function migrate(db) {

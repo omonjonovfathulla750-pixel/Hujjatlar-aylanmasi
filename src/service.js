@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { burnPasswordCheck, hashPassword, verifyPassword } from './auth.js';
 import { tx } from './db.js';
 import { todayIn } from './dates.js';
@@ -32,12 +34,93 @@ const MIME_BY_EXT = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.txt': 'text/plain; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
+  '.rtf': 'application/rtf',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.zip': 'application/zip',
+  '.rar': 'application/vnd.rar',
+  '.7z': 'application/x-7z-compressed',
 };
+const SAFE_INLINE_MIMES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/plain', 'text/csv']);
+const INTEGRATION_KEYS = ['sms_provider', 'doc_system', 'email_provider', 'telegram_bot'];
+const SECRET_FIELDS = ['password', 'token', 'bot_token'];
+
+function isPrivateIpv4(ip) {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts;
+  return (
+    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+function isPrivateIp(rawIp) {
+  const ip = String(rawIp || '').toLowerCase().split('%')[0];
+  if (net.isIPv4(ip)) return isPrivateIpv4(ip);
+  if (!net.isIPv6(ip)) return true;
+  if (ip === '::' || ip === '::1' || ip === '0:0:0:0:0:0:0:1' || ip === '0:0:0:0:0:0:0:0') return true;
+  if (ip.startsWith('::ffff:')) {
+    const rest = ip.slice(7);
+    if (net.isIPv4(rest)) return isPrivateIpv4(rest);
+    const hex = rest.split(':');
+    if (hex.length === 2 && hex.every((h) => /^[0-9a-f]{1,4}$/.test(h))) {
+      const hi = parseInt(hex[0], 16);
+      const lo = parseInt(hex[1], 16);
+      return isPrivateIpv4(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
+    return true;
+  }
+  const head = ip.split(':')[0] || '';
+  if (/^(fc|fd)[0-9a-f]{2}$/.test(head) || /^fe[89ab][0-9a-f]$/.test(head)) return true;
+  return false;
+}
+
+async function validateExternalUrl(rawUrl, resolveDns = false) {
+  let u;
+  try { u = new URL(String(rawUrl)); } catch { throw unprocessable('API manzili noto\u02bbg\u02bbri formatda'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw unprocessable('Faqat HTTP yoki HTTPS manzillariga ruxsat berilgan');
+  }
+  if (u.username || u.password) {
+    throw unprocessable('API manzilida login yoki parol ko\u02bbrsatish mumkin emas');
+  }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw unprocessable('Lokal yoki ichki tarmoq manzillariga ruxsat berilmaydi');
+  }
+  if (net.isIP(host)) {
+    if (isPrivateIp(host)) throw unprocessable('Ichki IP manzillariga ruxsat berilmaydi');
+    return u.toString();
+  }
+  if (resolveDns) {
+    let addrs;
+    try { addrs = await dns.lookup(host, { all: true }); } catch { throw unprocessable('API xostini aniqlab bo\u02bblmadi'); }
+    if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) {
+      throw unprocessable('Ichki tarmoqqa yo\u02bbnaltirilgan API manzili taqiqlangan');
+    }
+  }
+  return u.toString();
+}
+
+function maskIntegrationSecrets(val) {
+  if (!val || typeof val !== 'object') return val;
+  const out = { ...val };
+  for (const f of SECRET_FIELDS) {
+    if (f in out) {
+      out[`has_${f}`] = Boolean(out[f]);
+      out[f] = '';
+    }
+  }
+  return out;
+}
 const STATUS_LABELS = { ok: 'Vaqtida bajarildi', late: 'Muddatdan oshdi', prog: 'Jarayonda', new: 'Biriktirilmagan' };
 const PRIORITY_LABELS = { urgent: 'Shoshilinch', high: 'Yuqori', normal: 'Oddiy', low: 'Past' };
 function formatTzDateTime(isoStr, tz) {
@@ -86,9 +169,15 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
     const out = {
       id: u.id, name: u.name, org_id: u.org_id,
       department: u.department ?? null, pos: u.pos, role: u.role, active: !!u.active,
+      created_at: u.created_at ?? null,
     };
     if (viewer.role === 'admin') out.code = u.code;
-    if (viewer.id === u.id || viewer.role === 'admin') out.auth_reset_required = !!u.must_change_password;
+    if (viewer.id === u.id || viewer.role === 'admin') {
+      out.auth_reset_required = !!u.must_change_password;
+    }
+    if (viewer.id === u.id || viewer.role === 'admin' || viewer.role === 'operator' || viewer.role === 'viewer') {
+      out.onboarding_required = u.code === 'U001';
+    }
     return out;
   };
 
@@ -168,7 +257,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
 
     // ---- autentifikatsiya ----
     login(ctx, { id, password }) {
-      const user = repo.userByCode(String(id));
+      const user = repo.userByCodeIgnoreCase(String(id).trim());
       let ok = false;
       if (user && user.active && user.password_hash) ok = verifyPassword(password, user.password_hash);
       else burnPasswordCheck(password);
@@ -208,6 +297,40 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       return { ok: true, ...tokens.issue(updated), user: publicUser(updated, updated) };
     },
 
+    registerEmployee(ctx, b) {
+      if (ctx.user.code !== 'U001') {
+        throw forbidden('Faqat boshlangʻich U001 shablon akkaunti orqali roʻyxatdan oʻtish mumkin');
+      }
+      const login = String(b.login || '').trim();
+      if (!/^[a-zA-Z0-9._-]{2,64}$/.test(login)) {
+        throw unprocessable('Login faqat lotin harflari, raqamlar va . _ - belgilaridan iborat boʻlishi kerak (2-64 belgi)');
+      }
+      if (b.password_confirm !== undefined && b.password !== b.password_confirm) {
+        throw unprocessable('Parol va tasdiqlash paroli mos kelmadi');
+      }
+      if (repo.userByCodeIgnoreCase(login)) {
+        throw conflict('Bu login allaqachon band qilingan, boshqa login tanlang');
+      }
+      const orgId = b.org_id || ctx.user.org_id || 1;
+      if (!repo.orgById(orgId)) throw unprocessable('Tashkilot topilmadi');
+
+      const newId = mapUnique(() => repo.insertUser({
+        name: b.full_name,
+        org_id: orgId,
+        department: b.department ?? null,
+        pos: b.position,
+        role: 'user',
+        code: login,
+        password_hash: hashPassword(b.password),
+        must_change_password: 0,
+        created_at: nowIso(),
+      }), 'Bu login allaqachon band qilingan, boshqa login tanlang');
+
+      const created = repo.userById(newId);
+      audit({ ...ctx, user: created }, 'register_employee', 'user', created.id, { login });
+      return { ok: true, ...tokens.issue(created), user: publicUser(created, created) };
+    },
+
     me: (user) => publicUser(user, user),
 
     bootstrap(user) {
@@ -218,6 +341,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
           role: user.role,
           department: user.department ?? null,
           auth_reset_required: !!user.must_change_password,
+          onboarding_required: user.code === 'U001',
         },
         today: today(),
         orgs: repo.listOrgs(),
@@ -250,7 +374,9 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
           }
         }
       }
-      addEvent(id, user.id, 'viewed', { role: user.role });
+      if (!repo.hasEvent(id, user.id, 'viewed')) {
+        addEvent(id, user.id, 'viewed', { role: user.role });
+      }
       if (updated) d = repo.docById(id);
       return serializeDoc(d);
     },
@@ -259,6 +385,8 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       loadVisibleDoc(user, id);
       const events = repo.listEvents(id);
       const doc = repo.docById(id);
+      const userMap = new Map(repo.listUsers().map((u) => [u.id, u]));
+      const orgMap = new Map(repo.listOrgs().map((o) => [o.id, o]));
       const viewedMap = {};
       for (const ev of events.filter((e) => e.event_type === 'viewed')) {
         const uid = ev.user_id;
@@ -266,12 +394,12 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       }
       const timeline = [];
       const evCreated = events.find((e) => e.event_type === 'created');
-      timeline.push({ time: evCreated?.created_at || doc.created_at, type: 'created', label: 'Hujjat yaratildi', user_id: doc.created_by, user_name: repo.userById(doc.created_by)?.name });
+      timeline.push({ time: evCreated?.created_at || doc.created_at, type: 'created', label: 'Hujjat yaratildi', user_id: doc.created_by, user_name: userMap.get(doc.created_by)?.name });
       for (const t of doc.tasks) {
         for (const a of t.assignees) {
-          const aUser = repo.userById(a.user_id);
-          const issuer = repo.userById(a.assigned_by);
-          const evAssigned = events.find((e) => e.event_type === 'assigned' && e.details?.to === a.user_id);
+          const aUser = userMap.get(a.user_id);
+          const issuer = userMap.get(a.assigned_by);
+          const evAssigned = events.find((e) => e.event_type === 'assigned' && e.details?.to === a.user_id && (!e.details?.task_id || e.details.task_id === t.id));
           const assignedTime = evAssigned?.created_at || a.assigned_at;
           timeline.push({ time: assignedTime, type: 'assigned', label: `${issuer?.name || '—'} → ${aUser?.name || '—'} ga biriktirdi`, user_id: a.assigned_by, user_name: issuer?.name, target_user_id: a.user_id, target_user_name: aUser?.name, task_title: t.title, deadline: t.deadline });
           const vt = a.viewed_at || viewedMap[a.user_id];
@@ -284,7 +412,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
             timeline.push({ time: vt, type: 'viewed', label: `${aUser?.name || '—'} hujjatni ko\u02bbrib chiqdi`, user_id: a.user_id, user_name: aUser?.name, wait_minutes: waitMin });
           }
           if (a.delegated_to) {
-            const toUser = repo.userById(a.delegated_to);
+            const toUser = userMap.get(a.delegated_to);
             timeline.push({ time: a.delegated_at || assignedTime, type: 'delegated', label: `${aUser?.name || '—'} → ${toUser?.name || '—'} ga uzatdi`, user_id: a.user_id, user_name: aUser?.name, target_user_id: a.delegated_to, target_user_name: toUser?.name, note: a.delegation_note });
           }
           if (a.done_date) {
@@ -296,14 +424,14 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       }
       for (const s of doc.signatures) {
         if (s.signed_at) {
-          const sUser = repo.userById(s.user_id);
+          const sUser = userMap.get(s.user_id);
           const evSign = events.find((e) => e.event_type === 'signed' && e.user_id === s.user_id);
           timeline.push({ time: evSign?.created_at || s.signed_at, type: 'signed', label: `${sUser?.name || '—'} hujjatni imzoladi`, user_id: s.user_id, user_name: sUser?.name });
         }
       }
       for (const tr of doc.transfers) {
-        const fromOrg = repo.orgById(tr.from_org);
-        const toOrg = repo.orgById(tr.to_org);
+        const fromOrg = orgMap.get(tr.from_org);
+        const toOrg = orgMap.get(tr.to_org);
         const evTr = events.find((e) => e.event_type === 'transferred' && e.details?.to_org === tr.to_org);
         timeline.push({ time: evTr?.created_at || tr.sent_at, type: 'transferred', label: `${fromOrg?.name || '—'} → ${toOrg?.name || '—'} ga yuborildi`, from_org: tr.from_org, to_org: tr.to_org });
         if (tr.received_at) timeline.push({ time: tr.received_at, type: 'received', label: `${toOrg?.name || '—'} hujjatni qabul qildi` });
@@ -430,7 +558,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       if (!buf.length) throw unprocessable('Fayl bo\u02bbsh bo\u02bblishi mumkin emas');
       if (buf.length > MAX_FILE_BYTES) throw unprocessable('Fayl hajmi 10 MB dan oshmasligi kerak');
 
-      const mime = MIME_BY_EXT[ext] || (String(mime_type || '').slice(0, 100) || 'application/octet-stream');
+      const mime = MIME_BY_EXT[ext] || 'application/octet-stream';
       const cleanNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 1000) : null;
       const nowT = nowIso();
 
@@ -530,13 +658,15 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       }
       const att = repo.attachmentBlobById(entry.attachmentId);
       if (!att) throw notFound('Fayl topilmadi');
-      const mime = String(att.mime_type || 'application/octet-stream').toLowerCase();
-      const safeInline = mime.startsWith('application/pdf') || mime.startsWith('image/') || mime.startsWith('text/plain') || mime.startsWith('text/csv');
+      const rawMime = String(att.mime_type || 'application/octet-stream').toLowerCase();
+      const baseMime = rawMime.split(';')[0].trim();
+      const safeInline = SAFE_INLINE_MIMES.has(baseMime);
       return new Reply(200, Buffer.from(att.data), {
         raw: true,
         headers: {
           'Content-Type': att.mime_type || 'application/octet-stream',
           'Content-Disposition': contentDisposition(att.orig_name, safeInline ? 'inline' : 'attachment'),
+          'X-Content-Type-Options': 'nosniff',
           'X-Frame-Options': 'SAMEORIGIN',
           'Content-Security-Policy': "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'self'; frame-ancestors 'self'",
         },
@@ -578,6 +708,12 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
       if (!isManager(ctx.user) && !own) throw forbidden('Ruxsat yo\u02bbq');
       const toUser = repo.userById(toUserId);
       if (!toUser || !toUser.active) throw unprocessable('Bajaruvchi topilmadi yoki faol emas');
+      if (toUser.role !== 'user' || toUser.code === 'U001') {
+        throw unprocessable('Topshiriqni faqat faol oddiy xodimga uzatish mumkin');
+      }
+      if (toUser.id === a.user_id || toUser.id === ctx.user.id) {
+        throw unprocessable('Topshiriqni o\u02bbzingizga yoki joriy bajaruvchiga uzata olmaysiz');
+      }
       const nowT = nowIso();
       const t = today();
       tx(db, () => {
@@ -796,15 +932,17 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
     createUserAdmin(ctx, b) {
       requireAdmin(ctx.user);
       if (!repo.orgById(b.org_id)) throw unprocessable('Tashkilot topilmadi');
-      if (repo.userByCode(b.code)) throw conflict('Bu kod allaqachon mavjud');
+      const cleanCode = String(b.code || '').trim();
+      if (repo.userByCodeIgnoreCase(cleanCode)) throw conflict('Bu kod allaqachon mavjud');
       if (!b.password || b.password.length < 8) throw unprocessable('Parol kamida 8 belgi bo\u02bblishi kerak');
       const id = mapUnique(() => repo.insertUser({
         name: b.name, org_id: b.org_id, department: b.department ?? null,
-        pos: b.pos, role: b.role || 'user', code: b.code,
+        pos: b.pos, role: b.role || 'user', code: cleanCode,
         password_hash: hashPassword(b.password),
         must_change_password: b.auth_reset_required ? 1 : 0,
+        created_at: nowIso(),
       }), 'Bu kod allaqachon mavjud');
-      audit(ctx, 'user_create', 'user', id, { code: b.code, role: b.role });
+      audit(ctx, 'user_create', 'user', id, { code: cleanCode, role: b.role });
       return publicUser(repo.userById(id), ctx.user);
     },
 
@@ -857,24 +995,24 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
     // ---- integratsiya ----
     getIntegrations: (caller) => {
       requireAdmin(caller);
-      return repo.listIntegrations().map((r) => (
-        r.value && typeof r.value === 'object' && 'password' in r.value
-          ? { ...r, value: { ...r.value, password: '', has_password: Boolean(r.value.password) } }
-          : r
-      ));
+      return repo.listIntegrations().map((r) => ({ ...r, value: maskIntegrationSecrets(r.value) }));
     },
 
     async saveIntegration(ctx, key, value) {
       requireAdmin(ctx.user);
-      const ALLOWED = ['sms_provider', 'doc_system', 'email_provider', 'telegram_bot'];
-      if (!ALLOWED.includes(key)) throw unprocessable('Noma\u02bblum integratsiya turi');
+      if (!INTEGRATION_KEYS.includes(key)) throw unprocessable('Noma\u02bblum integratsiya turi');
 
       const prev = repo.getIntegration(key);
       const cleanValue = value && typeof value === 'object' ? { ...value } : {};
-      delete cleanValue.has_password;
       const isTest = Boolean(cleanValue.test_connection);
       delete cleanValue.test_connection;
-      if (!cleanValue.password && prev?.value?.password) cleanValue.password = prev.value.password;
+      for (const f of SECRET_FIELDS) {
+        delete cleanValue[`has_${f}`];
+        if (!cleanValue[f] && prev?.value?.[f]) cleanValue[f] = prev.value[f];
+      }
+      if (cleanValue.api_url !== undefined && cleanValue.api_url !== null && String(cleanValue.api_url).trim() !== '') {
+        cleanValue.api_url = await validateExternalUrl(cleanValue.api_url, isTest);
+      }
 
       if (isTest) {
         if (key === 'sms_provider' && cleanValue.api_url && cleanValue.test_phone) {
@@ -892,6 +1030,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
               method: 'POST',
               headers,
               body: JSON.stringify(payload),
+              redirect: 'error',
               signal: AbortSignal.timeout(10000),
             });
             const result = { key, status: r.ok ? 'success' : 'error', http_status: r.status, message: r.ok ? 'SMS muvaffaqiyatli yuborildi!' : `SMS yuborishda xato: HTTP ${r.status}` };
@@ -912,6 +1051,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
 
     deleteIntegration(ctx, key) {
       requireAdmin(ctx.user);
+      if (!INTEGRATION_KEYS.includes(key)) throw unprocessable('Noma\u02bblum integratsiya turi');
       repo.deleteIntegration(key);
       audit(ctx, 'integration_delete', 'integration', null, { key });
       return { ok: true };
@@ -949,7 +1089,7 @@ export function createService({ db, repo, tokens, config, now = () => new Date()
         db.prepare('DELETE FROM notifications').run();
         db.prepare('DELETE FROM sms_queue').run();
         db.prepare('DELETE FROM audit_log').run();
-        db.prepare('DELETE FROM refresh_tokens').run();
+        db.prepare('DELETE FROM refresh_tokens WHERE user_id != ?').run(ctx.user.id);
         db.prepare('DELETE FROM doc_events').run();
         db.prepare('DELETE FROM documents').run();
         db.exec("UPDATE sqlite_sequence SET seq = 0 WHERE name IN ('documents','tasks','assignees','signatures','transfers','sms_queue','audit_log','notifications','doc_events','attachments')");

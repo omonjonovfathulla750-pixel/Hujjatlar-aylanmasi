@@ -18,8 +18,8 @@ const MN=['Yanvar','Fevral','Mart','Aprel','May','Iyun','Iyul','Avgust','Sentyab
 const ST={ok:'Vaqtida bajarildi',late:'Muddatdan oshdi',prog:'Jarayonda',new:'Biriktirilmagan'},ORDER=['late','prog','new','ok'],ROLE_UZ={admin:'Admin',operator:'Operator',viewer:'Kuzatuvchi',user:'Xodim'};
 const PR_UZ={urgent:'Shoshilinch',high:'Yuqori',normal:'Oddiy',low:'Past'};
 const EVT_ICON={created:'📄',assigned:'👤',delegated:'🔀',viewed:'👁',viewed_assignee:'👁',completed:'✅',completed_late:'⚠️',signed:'✍️',transferred:'📤',received:'📥',file_uploaded:'📎',response_file:'📤',unassigned:'✖️',task_deleted:'🗑'};
-let S={me:null,orgs:[],users:[],docs:[],integrations:[],T:[],page:'dash',doc:null,year:+today.slice(0,4),month:+today.slice(5,7)-1,calYear:+today.slice(0,4),calMonth:+today.slice(5,7)-1,day:today,f:{q:'',st:'all',org:'all',uid:'all',ty:'all'},unread:0,notifications:[],addOrgOpen:false,modal:null};
-let lastLoadAt=0,loadInFlight=null,lastDataSig='',renderedPage='dash',mutSeq=0,kpiSt=false;
+let S={me:null,orgs:[],users:[],docs:[],integrations:[],T:[],page:'dash',doc:null,year:+today.slice(0,4),month:+today.slice(5,7)-1,calYear:+today.slice(0,4),calMonth:+today.slice(5,7)-1,day:today,f:{q:'',st:'all',org:'all',uid:'all',ty:'all'},unread:0,notifications:[]};
+let lastLoadAt=0,loadInFlight=null,lastDataSig='',renderedPage='dash',mutSeq=0,kpiSt=false,dirtyForm=false;
 
 // ---- Token / API ----
 const tok=()=>localStorage.getItem('tk');
@@ -56,7 +56,7 @@ let previewUrl=null;
 function pvTableHtml(rows){
  return`<div class="pv-wrap"><table class="pv-tbl"><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
-async function previewFile(fileId,fallbackName,mimeHint,retry=true){
+async function previewFile(fileId,fallbackName,mimeHint){
  const m=$('#global-modal');
  if(m)m.innerHTML=`<div class="modal-wrap"><div class="modal-box" style="max-width:860px"><div class="bar"><h3 style="margin:0;flex:1">📄 ${esc(fallbackName||'Fayl')}</h3><button class="mini" data-a="close-gmodal">✕</button></div><p class="loading">Fayl yuklanmoqda...</p></div></div>`;
  const pv=await api('GET',`attachments/${fileId}/preview`);
@@ -73,7 +73,7 @@ async function previewFile(fileId,fallbackName,mimeHint,retry=true){
   body=`<pre class="pv-wrap" style="white-space:pre-wrap;font-size:13px;margin:0">${esc(pv.text)}</pre>`;
  }else{
   const mime=(pv.mime_type||mimeHint||'').toLowerCase();
-  if(mime.includes('pdf')||mime.startsWith('image/')){
+  if(mime.includes('pdf')||(mime.startsWith('image/')&&!mime.includes('svg'))){
    const tk=await api('POST',`attachments/${fileId}/ticket`);
    if(tk.error){if(m)m.innerHTML='';return;}
    previewUrl=`/api/v1/attachments/view/${tk.ticket}`;
@@ -104,7 +104,8 @@ async function uploadSelectedFiles(endpoint,files,note=null){
  if(!files||!files.length)return true;
  for(const f of files){
   if(f.size>10*1024*1024){alert(`${f.name}: hajmi 10 MB dan oshmasligi kerak`);return false}
-  const b64=await fileToBase64(f);
+  let b64;
+  try{b64=await fileToBase64(f);}catch(e){alert(e?.message||'Faylni o\u02bbqishda xatolik');return false}
   const body={filename:f.name,mime_type:f.type||'application/octet-stream',data_base64:b64};
   if(note)body.note=note;
   const r=await api('POST',endpoint,body);
@@ -119,7 +120,6 @@ const tst=t=>!t.assignees.length?'new':t.assignees.some(a=>ast(a,t)==='late')?'l
 const worst=l=>ORDER.find(s=>l.some(t=>t.st===s))||'';
 const user=id=>S.users.find(u=>u.id===id)||{name:'—',org_id:0},org=id=>S.orgs.find(o=>o.id===id)||{name:'—'};
 const short=n=>n.split(/\s+/).slice(0,2).join(' '),admin=()=>['admin','operator'].includes(S.me.role),isA=()=>S.me.role==='admin',seeAll=()=>S.me.role!=='user';
-const dst=d=>d.transfers.length?'Yuborilgan':d.signatures.every(s=>s.signed_at)?'Imzolangan':'Imzolanmoqda';
 const rebuildTasks=()=>{S.T=S.docs.flatMap(d=>d.tasks.map(t=>({...t,doc:d,date:d.created_at,st:tst(t)})))};
 const dataSig=d=>`${d.today}|${(d.users||[]).length}|${(d.orgs||[]).length}|`+(d.docs||[]).map(x=>`${x.id}:${x.number}:${x.title}:${x.tasks.map(t=>`${t.id}:${t.assignees.map(a=>`${a.id}:${a.done_date||''}:${a.delegated_to||''}:${a.viewed_at||''}:${(a.files||[]).map(f=>f.id+':'+(f.note||'')).join('+')}`).join(',')}`).join(';')}:${(x.attachments||[]).map(f=>f.id+':'+(f.note||'')).join('+')}:${x.signatures.map(s=>s.signed_at||'').join(',')}:${x.transfers.length}`).join('|');
 
@@ -139,7 +139,7 @@ async function load(opts={}){
     lastDataSig=sig;
     const isFirst=!lastLoadAt;
     lastLoadAt=Date.now();
-    today=d.today;
+    if(d.today)today=d.today;
     if(isFirst&&d.today){
       S.year=+d.today.slice(0,4);S.month=+d.today.slice(5,7)-1;
       S.calYear=S.year;S.calMonth=S.month;S.day=d.today;
@@ -147,16 +147,21 @@ async function load(opts={}){
     Object.assign(S,d);
     rebuildTasks();
     S.unread=d.unread||0;
-    if(opts.renderIfChanged&&changed&&!hasPendingFileInput()&&!hasOpenModal())render();
+    if(opts.renderIfChanged&&changed&&!isUiBusyEditing())render();
     return true;
   })();
   loadInFlight=run;
   try{return await run;}finally{if(loadInFlight===run)loadInFlight=null;}
 }
-function hasPendingFileInput(){
+function isUiBusyEditing(){
+  if(hasOpenModal())return true;
+  if(S.page==='new'||dirtyForm)return true;
+  if(typeof document==='undefined')return false;
+  const ae=document.activeElement;
+  if(ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName))return true;
   if(typeof document.querySelectorAll!=='function')return false;
   if([...document.querySelectorAll('input[type="file"]')].some(el=>el.files&&el.files.length>0))return true;
-  return[...document.querySelectorAll('.resp-note,#df-note,#n-ti,#n-no')].some(el=>String(el.value||'').trim().length>0);
+  return[...document.querySelectorAll('.resp-note,#df-note,#n-ti,#n-no,#n-dept,#org-new-inp,#sp-cur,#sp-new,#sp-con,#sms-url,#sms-login,#sms-pass,#sms-sender,#sms-test-phone')].some(el=>String(el.value||'').trim().length>0);
 }
 function hasOpenModal(){
   const gm=$('#global-modal'),um=$('#user-modal');
@@ -169,7 +174,7 @@ async function loadUnread(){
 async function loadIntegrations(){
   if(!isA())return;
   const r=await api('GET','integrations',undefined,true,true);
-  if(!r.error&&Array.isArray(r.data)){S.integrations=r.data;if(S.page==='set')render();}
+  if(!r.error&&Array.isArray(r.data)){S.integrations=r.data;if(S.page==='set'&&!isUiBusyEditing())render();}
 }
 async function openDoc(id,force=false){
   const hasLocal=S.docs.some(x=>x.id===id);
@@ -185,7 +190,7 @@ async function openDoc(id,force=false){
     const i=S.docs.findIndex(x=>x.id===d.id);
     if(i>=0)S.docs[i]=d;else S.docs.unshift(d);
     rebuildTasks();
-    if(!hasLocal||force||(S.page==='doc'&&S.doc===id&&changed&&!hasPendingFileInput()&&!hasOpenModal())){
+    if(!hasLocal||force||(S.page==='doc'&&S.doc===id&&changed&&!isUiBusyEditing())){
       S.doc=id;S.page='doc';render();
     }
   }else if(hasLocal&&force){
@@ -206,7 +211,7 @@ const exportBtns=()=>`<div class="exp-grp"><button class="btn sm ok" data-a="exp
 const stOpts=[['all','Barcha holatlar'],...ORDER.map(k=>[k,ST[k]])];
 const tyOpts=[['all','Barcha turlar'],...['Nazorat varaqasi','Xat','Buyruq','Farmoyish'].map(x=>[x,x])];
 const q_=()=>S.f.q.toLowerCase();
-const execUsers=()=>S.users.filter(u=>u.role==='user'||S.T.some(t=>t.assignees.some(a=>a.user_id===u.id)));
+const execUsers=()=>S.users.filter(u=>(u.role==='user'&&!u.onboarding_required)||S.T.some(t=>t.assignees.some(a=>a.user_id===u.id)));
 const evalForUser=(t,uid)=>{if(!uid||uid==='all')return t;const a=t.assignees.find(x=>x.user_id===+uid);return a?{...t,st:ast(a,t),empA:a}:null};
 const hasActiveFilters=()=>S.f.st!=='all'||S.f.org!=='all'||S.f.uid!=='all'||S.f.ty!=='all'||!!S.f.q;
 function filteredTasks({usePeriod=true,useStatus=true,useEmp=true,useOrg=true,useType=true}={}){
@@ -261,7 +266,8 @@ function dash(){
   }).filter(x=>x.us.total>0||String(x.u.id)===String(S.f.uid)).sort((a,b)=>b.us.total-a.us.total||b.us.pct-a.us.pct);
   empSection=`<div class="pn"><div class="bar"><h3 style="margin:0;flex:1">👥 Xodimlar boʻyicha ijro statistikasi</h3><span class="mut" style="font-size:12px">Xodim ustiga bosing — alohida filtrlanadi</span></div><div class="sc"><table><thead><tr><th>Xodim</th><th>Jami</th><th>Vaqtida</th><th>Jarayonda</th><th>Kechikkan</th><th>Oʻrtacha kun</th><th>Samaradorlik</th></tr></thead><tbody>${empRows.map(({u,us})=>`<tr class="rw" data-a="pick-emp" data-uid="${u.id}" ${String(S.f.uid)===String(u.id)?'style="background:color-mix(in srgb,var(--pri) 14%,transparent)"':''}><td><b>${esc(u.name)}</b><small>${esc(org(u.org_id).name)}${u.pos?' · '+esc(u.pos):''}</small></td><td><b>${us.total}</b></td><td><i class="ok">${us.ok}</i></td><td><i class="prog">${us.prog}</i></td><td><i class="late">${us.late}</i></td><td>${us.avg.toFixed(1)}</td><td><span class="mini-bar"><i style="width:${us.pct}%"></i></span><b>${us.pct}%</b></td></tr>`).join('')||'<tr><td colspan="7" class="mut">Tanlangan davr uchun biriktirilgan topshiriqlar yoʻq</td></tr>'}</tbody></table></div></div>`;
  }
- return`<div class="bar"><div style="flex:1"><h2>Salom, ${esc(short(S.me.name))} 👋</h2><span class="mut">${S.year}-yil${S.month<0?'':' · '+MN[S.month]} · hujjat aylanish ko\u02bbrsatkichlari</span></div>${exportBtns()}</div>
+ const panelLabel=S.me.role==='admin'?'Administrator paneli':S.me.role==='operator'?'Operator paneli':S.me.role==='viewer'?'Kuzatuvchi paneli':'Xodim paneli';
+ return`<div class="bar"><div style="flex:1"><h2>Salom, ${esc(short(S.me.name))} 👋</h2><span class="mut">${panelLabel} · ${S.year}-yil${S.month<0?'':' · '+MN[S.month]} · hujjat aylanish ko\u02bbrsatkichlari</span></div>${exportBtns()}</div>
 ${filterBar({showPeriod:true,showEmp:true,showOrg:true,showStatus:true,showType:true})}
 ${empBanner}
 <div class="k4">${card('Jami topshiriqlar',s.total,'all',`yil bo\u02bbyicha ${y.total} ta`)}${card('Vaqtida bajarildi',s.ok,'ok',s.pct+'% bajarildi')}${card('Muddatdan oshdi',s.late,'late',s.latePct+'% muddati o\u02bbtgan')}${card('Jarayonda',s.prog+s.new,'prog',`${s.progPct}% · ${s.new} ta biriktirilmagan`)}</div>
@@ -293,7 +299,7 @@ ${taskTable(dl)}`}
 const filePickHtml=(id,multiple=false)=>`<label class="file-pick"><input type="file" id="${id}" class="vh-file"${multiple?' multiple':''}><span class="file-pick-btn">📎 Fayl tanlash</span><span class="file-name">Tanlanmagan</span></label>`;
 const initials=n=>short(n).split(/\s+/).map(x=>x[0]||'').join('').slice(0,2).toUpperCase()||'X';
 const respItemHtml=f=>`<div class="att-chip"><div class="att-info"><span class="att-name">📄 ${esc(f.orig_name)} <span class="mut" style="font-weight:400">(${fmtSize(f.size_bytes)})</span></span>${f.note?`<span class="att-note">📝 ${esc(f.note)}</span>`:''}</div><div style="display:flex;gap:4px;align-items:center"><button data-a="view-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" data-mime="${esc(f.mime_type||'')}" title="Ko\u02bbrish">👁 Ko\u02bbrish</button><button data-a="dl-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" title="Yuklab olish">⬇</button>${isA()?`<button data-a="del-file" data-id="${f.id}" title="Faylni o\u02bbchirish (Admin)" style="color:var(--late)">🗑</button>`:''}</div></div>`;
-const taskCard=(t,d)=>{const st=tst(t),free=S.users.filter(u=>u.role==='user'&&u.active&&!t.assignees.some(a=>a.user_id===u.id));
+const taskCard=t=>{const st=tst(t),free=S.users.filter(u=>u.role==='user'&&u.active&&!u.onboarding_required&&!t.assignees.some(a=>a.user_id===u.id));
  return`<div class="pn"><div class="bar"><b style="flex:1">${esc(t.title)}</b>${badge(st)}${isA()?`<button class="mini" data-a="del-task" data-id="${t.id}" title="Topshiriqni oʻchirish" style="color:var(--late)">🗑 Topshiriqni oʻchirish</button>`:''}</div><p class="mut" style="margin:0 0 8px">Bergan: ${esc(user(t.issued_by).name)} · muddat ${t.deadline}</p>${t.assignees.map(a=>{const k=ast(a,t);const uObj=user(a.user_id);const delegTo=a.delegated_to?user(a.delegated_to):{name:null};const isOwn=a.user_id===S.me.id;const canAct=admin()||isOwn;
  return`<div class="exec-card"><div class="exec-head"><div class="exec-user"><div class="exec-av">${esc(initials(uObj.name))}</div><div><b>${esc(uObj.name)}</b><small>${esc(org(uObj.org_id).name)} · biriktirgan: ${esc(user(a.assigned_by).name)}, ${a.assigned_at}</small><div class="meta-pills">${a.viewed_at?`<span class="viewed-tag">👁 Ko\u02bbrildi: ${fmt(a.viewed_at)}</span>`:'<span class="not-viewed">Hali ko\u02bbrilmagan</span>'}${a.delegated_to?`<span class="deleg-tag">🔀 → ${esc(delegTo.name)} ga uzatildi${a.delegation_note?' ('+esc(a.delegation_note)+')':''}</span>`:''}</div></div></div><div class="exec-acts"><span class="bd ${k}">${k==='ok'?'✓ '+a.done_date:k==='late'?(a.done_date?'Kech '+a.done_date:'Muddati o\u02bbtdi'):'Jarayonda'}</span>
  ${isOwn?`<button class="mini" data-a="done" data-id="${a.id}" data-v="${a.done_date?'':'1'}" title="${a.done_date?'Bajarilishni bekor qilish':'Bajarildi deb belgilash'}">${a.done_date?'\u21ba Bekor':'✓ Bajarildi'}</button>`:''}
@@ -314,7 +320,7 @@ function docV(){const d=S.docs.find(x=>x.id===S.doc);if(!d)return'<p class="mut"
 <div class="att-list">${atts.map(f=>`<div class="att-item"><div class="att-info" data-a="view-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" data-mime="${esc(f.mime_type||'')}" style="cursor:pointer"><span class="att-name">📄 ${esc(f.orig_name)}</span>${f.note?`<span class="att-note">📝 ${esc(f.note)}</span>`:''}<span class="att-meta">${fmtSize(f.size_bytes)} · ${esc(short(user(f.uploaded_by).name))} · ${fmt(f.created_at)}</span></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn gh sm" data-a="view-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" data-mime="${esc(f.mime_type||'')}">👁 Ko\u02bbrish</button><button class="btn sm" data-a="dl-file" data-id="${f.id}" data-name="${esc(f.orig_name)}">⬇ Yuklab olish</button>${isA()?`<button class="mini" data-a="del-file" data-id="${f.id}" title="Faylni o\u02bbchirish" style="color:var(--late)">🗑 O\u02bbchirish</button>`:''}</div></div>`).join('')||'<p class="mut">Biriktirilgan fayl yo\u02bbq</p>'}</div>
 ${admin()?`<div class="file-row">${filePickHtml('df-files',true)}<input id="df-note" placeholder="Fayl tavsifi (ixtiyoriy)" style="flex:1;min-width:180px;font-size:12px"><button class="btn sm" data-a="up-doc-file" data-id="${d.id}">📎 Fayl biriktirish</button></div>`:''}</div>
 ${respFiles.length?`<div class="pn"><h3>📥 Xodimlar yuborgan javob fayllari (${respFiles.length})</h3><div class="att-list">${respFiles.map(f=>`<div class="att-item"><div class="att-info" data-a="view-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" data-mime="${esc(f.mime_type||'')}" style="cursor:pointer"><span class="att-name">📄 ${esc(f.orig_name)}</span>${f.note?`<span class="att-note">📝 ${esc(f.note)}</span>`:''}<span class="att-meta">Yuborgan: ${esc(f.userName)} · ${fmtSize(f.size_bytes)} · ${fmt(f.created_at)}</span></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn gh sm" data-a="view-file" data-id="${f.id}" data-name="${esc(f.orig_name)}" data-mime="${esc(f.mime_type||'')}">👁 Ko\u02bbrish</button><button class="btn sm" data-a="dl-file" data-id="${f.id}" data-name="${esc(f.orig_name)}">⬇ Yuklab olish</button>${isA()?`<button class="mini" data-a="del-file" data-id="${f.id}" title="Faylni o\u02bbchirish" style="color:var(--late)">🗑 O\u02bbchirish</button>`:''}</div></div>`).join('')}</div></div>`:''}
-<h3>Topshiriqlar</h3>${d.tasks.map(t=>taskCard(t,d)).join('')}`}
+<h3>Topshiriqlar</h3>${d.tasks.map(t=>taskCard(t)).join('')}`}
 
 // ---- Hayot sikli ----
 function timelineV(){
@@ -338,7 +344,7 @@ function timelineV(){
 </div>`).join('')||'<p class="mut">Voqealar yo\u02bbq</p>'}</div>`}
 
 // ---- Yangi hujjat ----
-function newV(){const us=S.users.filter(u=>u.role==='user'&&u.active);
+function newV(){const us=S.users.filter(u=>u.role==='user'&&u.active&&!u.onboarding_required);
  return`<div class="bar"><button class="btn gh" data-a="go" data-p="docs">← Hujjatlar</button><h2>Yangi hujjat</h2></div>
 <div class="pn fm">
   <label>Raqam<input id="n-no" placeholder="123/-26"></label>
@@ -359,7 +365,7 @@ const usersV=()=>{
  const pool=S.T.filter(t=>inP(t));
  return`<div class="bar"><h2>Xodimlar</h2>${isA()?'<button class="btn" data-a="new-user">＋ Yangi xodim</button>':''}</div>
 ${filterBar({showPeriod:true,showEmp:false,showOrg:true,showStatus:false,showType:false})}
-<div class="pn sc" style="margin-top:12px"><table><thead><tr><th>Xodim</th><th>Tashkilot / Boʻlim</th><th>Lavozim</th><th>Rol</th><th>Holat</th><th>Topshiriq</th><th>Vaqtida</th><th>Jarayonda</th><th>Kechikkan</th><th>Samaradorlik</th>${isA()?'<th>ID</th><th></th>':'<th></th>'}</tr></thead><tbody>${uList.map(u=>{const s=sum(pool.map(t=>evalForUser(t,u.id)).filter(Boolean));return`<tr ${!u.active?'style="opacity:.5"':''}><td>${esc(u.name)}</td><td>${esc(org(u.org_id).name)}${u.department?`<small>${esc(u.department)}</small>`:''}</td><td>${esc(u.pos||'')}</td><td>${ROLE_UZ[u.role]||u.role}</td><td>${u.active?'<span class="active-y">● Faol</span>':'<span class="active-n">● Bloklangan</span>'}</td><td>${s.total}</td><td><i class="ok">${s.ok}</i></td><td><i class="prog">${s.prog}</i></td><td><i class="late">${s.late}</i></td><td><span class="mini-bar"><i style="width:${s.pct}%"></i></span>${s.pct}%</td>${isA()?`<td>${esc(u.code||'')}</td><td style="white-space:nowrap"><button class="mini" data-a="emp-dash" data-id="${u.id}" title="Statistika">📊</button><button class="mini" data-a="edit-user" data-id="${u.id}" title="Tahrirlash">✏️</button><button class="mini" data-a="toggle-user" data-id="${u.id}" data-v="${u.active?'0':'1'}" title="${u.active?'Bloklash':'Faollashtirish'}">${u.active?'🔒':'🔓'}</button>${u.id!==S.me.id?`<button class="mini" data-a="del-user" data-id="${u.id}" title="Xodimni o\u02bbchirish" style="color:var(--late)">🗑</button>`:''}</td>`:`<td><button class="mini" data-a="emp-dash" data-id="${u.id}" title="Statistika">📊</button></td>`}</tr>`}).join('')}</tbody></table></div><div id="user-modal"></div>`;
+<div class="pn sc" style="margin-top:12px"><table><thead><tr><th>Xodim</th><th>Tashkilot / Boʻlim</th><th>Lavozim</th><th>Rol</th><th>Holat</th><th>Roʻyxatdan oʻtgan</th><th>Topshiriq</th><th>Vaqtida</th><th>Jarayonda</th><th>Kechikkan</th><th>Samaradorlik</th>${isA()?'<th>ID / Login</th><th></th>':'<th></th>'}</tr></thead><tbody>${uList.map(u=>{const s=sum(pool.map(t=>evalForUser(t,u.id)).filter(Boolean));return`<tr ${!u.active?'style="opacity:.5"':''}><td>${esc(u.name)}${u.onboarding_required?' <span class="bd new">Shablon eshik</span>':''}</td><td>${esc(org(u.org_id).name)}${u.department?`<small>${esc(u.department)}</small>`:''}</td><td>${esc(u.pos||'')}</td><td>${ROLE_UZ[u.role]||u.role}</td><td>${u.active?'<span class="active-y">● Faol</span>':'<span class="active-n">● Bloklangan</span>'}</td><td>${fmt(u.created_at)}</td><td>${s.total}</td><td><i class="ok">${s.ok}</i></td><td><i class="prog">${s.prog}</i></td><td><i class="late">${s.late}</i></td><td><span class="mini-bar"><i style="width:${s.pct}%"></i></span>${s.pct}%</td>${isA()?`<td>${esc(u.code||'')}</td><td style="white-space:nowrap"><button class="mini" data-a="emp-dash" data-id="${u.id}" title="Statistika">📊</button><button class="mini" data-a="edit-user" data-id="${u.id}" title="Tahrirlash">✏️</button><button class="mini" data-a="toggle-user" data-id="${u.id}" data-v="${u.active?'0':'1'}" title="${u.active?'Bloklash':'Faollashtirish'}">${u.active?'🔒':'🔓'}</button>${u.id!==S.me.id?`<button class="mini" data-a="del-user" data-id="${u.id}" title="Xodimni o\u02bbchirish" style="color:var(--late)">🗑</button>`:''}</td>`:`<td><button class="mini" data-a="emp-dash" data-id="${u.id}" title="Statistika">📊</button></td>`}</tr>`}).join('')}</tbody></table></div><div id="user-modal"></div>`;
 };
 
 function showUserModal(uid){
@@ -381,10 +387,11 @@ function showUserModal(uid){
 }
 
 function showDelegateModal(aid){
-  const list=S.users.filter(u=>u.active&&u.id!==S.me.id);
+  const curA=S.T.flatMap(t=>t.assignees).find(a=>a.id===aid);
+  const list=S.users.filter(u=>u.role==='user'&&u.active&&!u.onboarding_required&&u.id!==S.me.id&&(!curA||u.id!==curA.user_id));
   const m=$('#global-modal');if(!m)return;
   m.innerHTML=`<div class="modal-wrap"><div class="modal-box"><h3>🔀 Topshiriqni boshqa xodimga uzatish</h3><div class="form-gr">
-    <label class="full">Xodimni tanlang<select id="dl-user" class="inp">${list.map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(org(u.org_id).name)})</option>`).join('')}</select></label>
+    <label class="full">Xodimni tanlang<select id="dl-user" class="inp">${list.length?list.map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(org(u.org_id).name)})</option>`).join(''):'<option value="">Uzatish uchun boshqa xodim yo\u02bbq</option>'}</select></label>
     <label class="full">Izoh (ixtiyoriy)<textarea id="dl-note" rows="3" placeholder="Uzatish sababi yoki ko\u02bbrsatma..."></textarea></label>
   </div><div class="modal-actions">
     <button class="btn gh" data-a="close-gmodal">Bekor qilish</button>
@@ -401,6 +408,29 @@ function showForcePwModal(){
     <button class="btn gh" data-a="out">Chiqish</button>
     <button class="btn" data-a="save-force-pw">Parolni saqlash</button>
   </div></div></div>`;
+}
+
+function showOnboardingModal(){
+  const orgOpts=(S.orgs||[]).map(o=>`<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  return`<div class="modal-wrap" style="position:fixed;inset:0;z-index:999">
+    <div class="modal-box" style="max-width:520px">
+      <h3>👤 Yangi xodimni roʻyxatdan oʻtkazish</h3>
+      <p class="mut" style="margin-bottom:14px">Davom etish uchun shaxsiy maʼlumotlaringizni kiriting va oʻzingiz uchun doimiy login hamda parol yarating.</p>
+      <div class="form-gr">
+        <label class="full">Ism va Familiya *<input id="reg-name" class="inp" placeholder="Masalan: Rustam Karimov" autocomplete="name"></label>
+        <label class="full">Tashkilot<select id="reg-org" class="inp">${orgOpts}</select></label>
+        <label class="full">Boʻlim va Lavozimi *<input id="reg-pos" class="inp" placeholder="Masalan: Moliya boʻlimi yetakchi mutaxassisi"></label>
+        <label class="full">Yangi shaxsiy Login *<input id="reg-login" class="inp" placeholder="Masalan: r_karimov" autocomplete="username"></label>
+        <label>Yangi Parol *<input id="reg-pw" type="password" class="inp" placeholder="Kamida 8 belgi" autocomplete="new-password"></label>
+        <label>Parolni tasdiqlash *<input id="reg-pw2" type="password" class="inp" placeholder="Parolni takrorlang" autocomplete="new-password"></label>
+      </div>
+      <div id="reg-err" class="err-msg" style="margin-top:8px"></div>
+      <div class="modal-actions" style="justify-content:space-between">
+        <button type="button" class="btn gh" data-a="out">Chiqish</button>
+        <button type="button" class="btn" data-a="register-emp">Saqlash va kirish</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ---- Tashkilotlar ----
@@ -454,6 +484,11 @@ const NAV=[['🏠','Dashboard','dash'],['📄','Hujjatlar','docs'],['✅','Topsh
 let renderedAuthReset=null,renderedDoc=null;
 
 function render(){
+  if(S.me&&S.me.onboarding_required){
+    $('#app').innerHTML=showOnboardingModal();
+    renderedAuthReset=null;
+    return;
+  }
   const p=S.page;
   const sy=typeof scrollY==='number'?scrollY:0;
   const pg={dash,docs:docsV,doc:docV,timeline:timelineV,cal,tasks:tasksV,users:usersV,orgs:orgsV,set:setV,new:newV,notif:notifV}[p];
@@ -498,6 +533,7 @@ document.addEventListener('click',async ev=>{
   try{
     const a=t.dataset.a,v=t.dataset.v,id=+t.dataset.id;let sync=false;
     if(a==='go'){
+      dirtyForm=false;
       S.page=t.dataset.p;
       if(t.dataset.s!==undefined){S.f.st=t.dataset.s||'all';kpiSt=true;}
       else if(kpiSt){S.f.st='all';kpiSt=false;}
@@ -512,20 +548,25 @@ document.addEventListener('click',async ev=>{
       else if(S.page==='set'&&isA()){loadIntegrations();}
       else if(['dash','docs','tasks','cal','users','orgs'].includes(S.page)&&Date.now()-lastLoadAt>2000){load({silent:true,renderIfChanged:true});}
     }
-    else if(a==='open-notif'){const did=+t.dataset.doc;if(did){await openDoc(did);return;}}
+    else if(a==='open-notif'){const did=+t.dataset.doc;if(did){dirtyForm=false;await openDoc(did);return;}}
     else if(a==='clear-filters'){S.f={q:'',st:'all',org:'all',uid:'all',ty:'all'};kpiSt=false;}
     else if(a==='pick-emp'){S.f.uid=t.dataset.uid||'all';}
-    else if(a==='emp-dash'){S.f.uid=String(id);S.page='dash';}
-    else if(a==='doc'){await openDoc(id);return}
+    else if(a==='emp-dash'){dirtyForm=false;S.f.uid=String(id);S.page='dash';}
+    else if(a==='doc'){dirtyForm=false;await openDoc(id);return}
     else if(a==='day')S.day=t.dataset.d;
     else if(a==='mon')S.month=+t.dataset.m;
     else if(a==='cm'){let m=S.calMonth+ +v,y=S.calYear;if(m<0){m=11;y--}if(m>11){m=0;y++}S.calMonth=m;S.calYear=y;S.day=`${y}-${pad(m+1)}-01`}
     else if(a==='assign'){
       const df=$('#df-files')?.files,note=($('#df-note')?.value||'').trim()||null;
+      const uid=+$('#as'+id)?.value;if(!uid){alert('Xodimni tanlang');return;}
       mutSeq+=1;lastDataSig='';
-      if(df&&df.length&&S.doc)await uploadSelectedFiles(`documents/${S.doc}/files`,df,note);
-      await api('POST',`tasks/${id}/assignees`,{user_id:+$('#as'+id).value});
-      sync=true;
+      if(df&&df.length&&S.doc){
+        const ok=await uploadSelectedFiles(`documents/${S.doc}/files`,df,note);
+        if(!ok)return;
+      }
+      const r=await api('POST',`tasks/${id}/assignees`,{user_id:uid});
+      if(r.error)return;
+      dirtyForm=false;sync=true;
     }
     else if(a==='done'){
       const rf=$('#rf'+id)?.files;
@@ -533,10 +574,16 @@ document.addEventListener('click',async ev=>{
         const note=($('#rn'+id)?.value||'').trim();
         if(!note){alert('Javob fayli uchun qoʻshimcha tavsif yozish shart!');$('#rn'+id)?.focus?.();return;}
         mutSeq+=1;lastDataSig='';
-        if(await uploadSelectedFiles(`assignees/${id}/files`,rf,note))sync=true;
+        if(await uploadSelectedFiles(`assignees/${id}/files`,rf,note)){dirtyForm=false;sync=true;}
       }else{
         mutSeq+=1;lastDataSig='';
-        const r=await api('PATCH','assignees/'+id,{done_date:v?today:null});
+        let r=await api('PATCH','assignees/'+id,{done_date:v?(S.today||today):null},true,true);
+        if(r.error&&v&&/kelajak/i.test(r.error)){
+          await load({silent:true,force:true});
+          r=await api('PATCH','assignees/'+id,{done_date:S.today||today});
+        }else if(r.error){
+          alert(r.error);
+        }
         if(!r.error)sync=true;
       }
     }
@@ -585,22 +632,32 @@ document.addEventListener('click',async ev=>{
     else if(a==='add-org'){
       const name=($('#org-new-inp')?.value||'').trim();if(!name){alert('Tashkilot nomini kiriting');return;}
       const r=await api('POST','organizations',{name});
-      if(!r.error){S.orgs.push(r);}
+      if(!r.error){S.orgs.push(r);dirtyForm=false;}
     }
     else if(a==='create'){
+      const files=$('#n-files')?.files;
+      if(files&&files.length){
+        for(const f of files){if(f.size>10*1024*1024){alert(`${f.name}: hajmi 10 MB dan oshmasligi kerak`);return;}}
+      }
       const body={number:$('#n-no').value,type:$('#n-ty').value,org_id:+$('#n-og').value,department:($('#n-dept')?.value||'').trim()||null,deadline:$('#n-dl').value,title:$('#n-ti').value,priority:$('#n-pr')?.value||'normal',assignee:+$('#n-as').value||null,signers:[]};
       mutSeq+=1;lastDataSig='';
       const r=await api('POST','documents',body);if(r.error)return;
-      const files=$('#n-files')?.files;
-      if(files&&files.length){await uploadSelectedFiles(`documents/${r.id}/files`,files);}
-      mutSeq+=1;lastDataSig='';
+      if(files&&files.length){
+        const ok=await uploadSelectedFiles(`documents/${r.id}/files`,files);
+        if(!ok){
+          alert('Hujjat yaratildi, lekin faylni yuklashda xatolik yuz berdi. Hujjat sahifasidan faylni qayta yuklashingiz mumkin.');
+          dirtyForm=false;mutSeq+=1;lastDataSig='';
+          await load({force:true});await openDoc(r.id,true);return;
+        }
+      }
+      dirtyForm=false;mutSeq+=1;lastDataSig='';
       await load({force:true});await openDoc(r.id,true);return;
     }
     else if(a==='up-doc-file'){
       const files=$('#df-files')?.files,note=($('#df-note')?.value||'').trim()||null;
       if(!files||!files.length){alert('Fayl tanlang');return;}
       mutSeq+=1;lastDataSig='';
-      if(await uploadSelectedFiles(`documents/${id}/files`,files,note)){mutSeq+=1;await openDoc(id,true);load({silent:true,force:true});}
+      if(await uploadSelectedFiles(`documents/${id}/files`,files,note)){dirtyForm=false;mutSeq+=1;await openDoc(id,true);load({silent:true,force:true});}
       return;
     }
     else if(a==='up-resp'){
@@ -608,7 +665,7 @@ document.addEventListener('click',async ev=>{
       if(!files||!files.length){alert('Javob faylini tanlang');return;}
       if(!note){alert('Javob fayli uchun qo\u02bbshimcha tavsif yozish shart!');$('#rn'+aid)?.focus?.();return;}
       mutSeq+=1;lastDataSig='';
-      if(await uploadSelectedFiles(`assignees/${aid}/files`,files,note)){mutSeq+=1;await openDoc(S.doc,true);load({silent:true,force:true});}
+      if(await uploadSelectedFiles(`assignees/${aid}/files`,files,note)){dirtyForm=false;mutSeq+=1;await openDoc(S.doc,true);load({silent:true,force:true});}
       return;
     }
     else if(a==='view-file'){await previewFile(id,t.dataset.name||'fayl',t.dataset.mime||'');return;}
@@ -676,6 +733,7 @@ document.addEventListener('click',async ev=>{
       if(!payload.api_url){if(msgEl){msgEl.className='err-msg';msgEl.textContent='API manzilini kiriting';}return;}
       const r=await api('POST','integrations/sms_provider',payload);
       if(!r.error){
+        dirtyForm=false;
         await loadIntegrations();
         const afterMsg=$('#sms-prov-msg');
         if(afterMsg){
@@ -692,6 +750,31 @@ document.addEventListener('click',async ev=>{
       }
       return;
     }
+    else if(a==='register-emp'){
+      const errEl=$('#reg-err');if(errEl)errEl.textContent='';
+      const full_name=($('#reg-name')?.value||'').trim();
+      const position=($('#reg-pos')?.value||'').trim();
+      const login=($('#reg-login')?.value||'').trim();
+      const password=$('#reg-pw')?.value||'';
+      const password_confirm=$('#reg-pw2')?.value||'';
+      const org_id=+($('#reg-org')?.value||1)||1;
+      if(full_name.length<2){if(errEl)errEl.textContent='Ism va familiyani kiriting';return;}
+      if(position.length<2){if(errEl)errEl.textContent='Boʻlim va lavozimni kiriting';return;}
+      if(!/^[a-zA-Z0-9._-]{2,64}$/.test(login)){if(errEl)errEl.textContent='Login kamida 2 ta belgi (lotin harflari, raqamlar, . _ -) boʻlishi kerak';return;}
+      if(password.length<8){if(errEl)errEl.textContent='Parol kamida 8 belgidan iborat boʻlishi kerak';return;}
+      if(password!==password_confirm){if(errEl)errEl.textContent='Parol va tasdiqlash paroli mos kelmadi';return;}
+      const r=await api('POST','auth/register-employee',{full_name,position,login,password,password_confirm,org_id},true,true);
+      if(r.error){if(errEl)errEl.textContent=r.error;return;}
+      if(r.access_token){
+        saveTokens(r);
+        mutSeq+=1;lastDataSig='';renderedAuthReset=null;
+        S.page='dash';
+        await load({force:true});
+        render();
+        loadUnread();
+      }
+      return;
+    }
     else if(a==='save-force-pw'){
       const cur=$('#fp-cur')?.value||'',nw=$('#fp-new')?.value||'',con=$('#fp-con')?.value||'';
       if(!cur||nw.length<8){$('#fp-err').textContent='Yangi parol kamida 8 belgi bo\u02bblishi kerak';return;}
@@ -705,12 +788,12 @@ document.addEventListener('click',async ev=>{
       if(!cur||nw.length<8){$('#sp-msg').className='err-msg';$('#sp-msg').textContent='Yangi parol kamida 8 belgi bo\u02bblishi kerak';return;}
       if(nw!==con){$('#sp-msg').className='err-msg';$('#sp-msg').textContent='Parollar mos kelmadi';return;}
       const r=await api('POST','auth/change-password',{current_password:cur,new_password:nw});
-      if(!r.error&&r.access_token){saveTokens(r);S.me.auth_reset_required=false;$('#sp-cur').value='';$('#sp-new').value='';$('#sp-con').value='';$('#sp-msg').className='ok-msg';$('#sp-msg').textContent='✅ Parol muvaffaqiyatli yangilandi';}
+      if(!r.error&&r.access_token){saveTokens(r);S.me.auth_reset_required=false;dirtyForm=false;$('#sp-cur').value='';$('#sp-new').value='';$('#sp-con').value='';$('#sp-msg').className='ok-msg';$('#sp-msg').textContent='✅ Parol muvaffaqiyatli yangilandi';}
       return;
     }
     else if(a==='mark-read'){await api('POST',`notifications/${id}/read`);const r=await api('GET','notifications');if(!r.error){S.notifications=r.data;S.unread=r.data.filter(n=>!n.read).length;}}
     else if(a==='read-all'){await api('POST','notifications/read-all');const r=await api('GET','notifications');if(!r.error){S.notifications=r.data;S.unread=0;}}
-    if(sync){mutSeq+=1;lastDataSig='';if(S.page==='doc'&&S.doc){await openDoc(S.doc,true);load({silent:true,force:true});}else{await load({force:true});render();}return;}
+    if(sync){dirtyForm=false;mutSeq+=1;lastDataSig='';if(S.page==='doc'&&S.doc){await openDoc(S.doc,true);load({silent:true,force:true});}else{await load({force:true});render();}return;}
     render();
   }finally{
     if(isBtn){t.disabled=false;t.classList.remove('is-busy');}
@@ -719,16 +802,17 @@ document.addEventListener('click',async ev=>{
 document.addEventListener('pointerdown',ev=>{if(ev.target?.id==='q'&&ev.target.removeAttribute)ev.target.removeAttribute('readonly')});
 document.addEventListener('focusin',ev=>{if(ev.target?.id==='q'&&ev.target.removeAttribute)ev.target.removeAttribute('readonly')});
 document.addEventListener('change',ev=>{const t=ev.target;
- if(t&&t.type==='file'&&t.closest){const lbl=t.closest('.file-pick')?.querySelector?.('.file-name');if(lbl){const fs=t.files;lbl.textContent=!fs||!fs.length?'Tanlanmagan':fs.length===1?`${fs[0].name} (${fmtSize(fs[0].size)})`:`${fs.length} ta fayl tanlandi`;}return;}
- const f=t?.dataset?.f;if(!f)return;
- if(f==='sms-prov'){const u=$('#sms-url');if(u&&(!u.value||Object.values(SMS_PRESETS).includes(u.value)))u.value=SMS_PRESETS[t.value]||'';return;}
+ if(t&&t.type==='file'&&t.closest){dirtyForm=true;const lbl=t.closest('.file-pick')?.querySelector?.('.file-name');if(lbl){const fs=t.files;lbl.textContent=!fs||!fs.length?'Tanlanmagan':fs.length===1?`${fs[0].name} (${fmtSize(fs[0].size)})`:`${fs.length} ta fayl tanlandi`;}return;}
+ const f=t?.dataset?.f;
+ if(!f){if(t&&t.id!=='q'&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))dirtyForm=true;return;}
+ if(f==='sms-prov'){dirtyForm=true;const u=$('#sms-url');if(u&&(!u.value||Object.values(SMS_PRESETS).includes(u.value)))u.value=SMS_PRESETS[t.value]||'';return;}
  if(f==='fst'){S.f.st=t.value;kpiSt=false;}else if(f==='forg')S.f.org=t.value;else if(f==='fuid')S.f.uid=t.value;else if(f==='fty')S.f.ty=t.value;else if(f==='cyear'){S.calYear=+t.value;S.day=`${S.calYear}-${pad(Math.max(S.calMonth,0)+1)}-01`}else if(f==='cmonth'){S.calMonth=+t.value;S.day=`${S.calYear}-${pad(Math.max(S.calMonth,0)+1)}-01`}else{S[f]=+t.value;}render()});
-document.addEventListener('input',ev=>{if(ev.target.id!=='q')return;S.f.q=ev.target.value;const dt=$('#dt');if(!dt)return;if(S.page==='docs')dt.innerHTML=docsTbl();else if(S.page==='tasks')dt.innerHTML=tasksTbl();else if(S.page==='dash')dt.innerHTML=taskTable(filteredTasks({usePeriod:true,useStatus:true}).slice(0,20));});
+document.addEventListener('input',ev=>{const t=ev.target;if(t?.id!=='q'){if(t&&!t.dataset?.f&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))dirtyForm=true;return;}S.f.q=t.value;const dt=$('#dt');if(!dt)return;if(S.page==='docs')dt.innerHTML=docsTbl();else if(S.page==='tasks')dt.innerHTML=tasksTbl();else if(S.page==='dash')dt.innerHTML=taskTable(filteredTasks({usePeriod:true,useStatus:true}).slice(0,20));});
 document.addEventListener('keydown',ev=>{if(ev.target.id==='q'&&ev.key==='Enter'){S.page='docs';render();$('#q')?.focus?.()}});
 
-function loginUI(){$('#app').innerHTML='<div class="lgn pn"><h1>Hujjat aylanish tizimi</h1><p class="mut">Kirish uchun ID va parolni kiriting</p><input id="lid" placeholder="Xodim ID" autocomplete="username"><input id="lpw" type="password" placeholder="Parol" autocomplete="current-password"><button class="btn" id="lb">Kirish</button><p class="mut" id="le"></p></div>';
+function loginUI(){$('#app').innerHTML='<div class="lgn pn"><h1>Hujjat aylanish tizimi</h1><p class="mut">Kirish uchun login yoki ID va parolni kiriting</p><input id="lid" placeholder="Login yoki Xodim ID" autocomplete="username"><input id="lpw" type="password" placeholder="Parol" autocomplete="current-password"><button class="btn" id="lb">Kirish</button><p class="mut" id="le"></p></div>';
  const go=async()=>{$('#le').textContent='';let r,d={};try{r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:$('#lid').value.trim(),password:$('#lpw').value})});d=await r.json()}catch(e){$('#le').textContent='Server bilan aloqa yo\u02bbq';return}
-  if(r.ok&&d.access_token){saveTokens(d);location.reload()}else $('#le').textContent=d.error||'Xatolik'};
+  if(r.ok&&d.access_token){saveTokens(d);S.page='dash';if(typeof location!=='undefined'&&'hash'in location)location.hash=d.user?.role==='user'?'#employee':'#admin';location.reload()}else $('#le').textContent=d.error||'Xatolik'};
  $('#lb').onclick=go;$('#lid').onkeydown=$('#lpw').onkeydown=e=>{if(e.key==='Enter')go()}}
 
 (async()=>{
@@ -738,11 +822,12 @@ function loginUI(){$('#app').innerHTML='<div class="lgn pn"><h1>Hujjat aylanish 
     else loginUI();
     return;
   }
+  S.page='dash';
   render();
-  loadUnread();
+  if(!S.me?.onboarding_required)loadUnread();
   if(typeof setInterval==='function'){
-    setInterval(()=>{loadUnread();if(typeof document.visibilityState==='undefined'||document.visibilityState==='visible')load({silent:true,renderIfChanged:true});},15000);
+    setInterval(()=>{if(S.me?.onboarding_required)return;loadUnread();if(typeof document.visibilityState==='undefined'||document.visibilityState==='visible')load({silent:true,renderIfChanged:true});},15000);
     setInterval(()=>{const c=$('#clk');if(c)c.textContent='🕒 '+nowClock();},30000);
   }
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&tok()){loadUnread();load({silent:true,renderIfChanged:true});}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&tok()&&!S.me?.onboarding_required){loadUnread();load({silent:true,renderIfChanged:true});}});
 })();

@@ -2,6 +2,7 @@
 //   npm run user -- set-password U001 "YangiParol123"
 //   npm run user -- set-role U002 operator
 // Docker: docker compose exec api node --disable-warning=ExperimentalWarning scripts/user-admin.js set-password U001 "..."
+import { pathToFileURL } from 'node:url';
 import { hashPassword } from '../src/auth.js';
 import { loadConfig, ROLES } from '../src/config.js';
 import { openDb } from '../src/db.js';
@@ -23,7 +24,7 @@ export function runUserAdmin(repo, [cmd, code, value]) {
   throw new Error('Buyruq: set-password <ID> <parol> | set-role <ID> <rol>');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const config = loadConfig({ ...process.env, JWT_SECRET: process.env.JWT_SECRET || 'x'.repeat(32), ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'unused-pass', SEED_DEMO: 'false' });
     const repo = createRepo(openDb(config.dbPath));

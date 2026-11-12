@@ -6,7 +6,7 @@ import { tx } from './db.js';
 export const ORGS = ['Ichki ishlar vazirligi', 'Adliya vazirligi', 'Moliya vazirligi', 'Axborot texnologiyalari vazirligi'];
 
 export const USERS = [
-  ['Omonjonov Fatxullo Rustamali oʻgʻli', 1, 'Axborot tizimlari xavfsizligi boʻlimi boshligʻi', 'user', 'U001'],
+  ['Yangi xodim (Shablon)', 1, 'Boshlangʻich roʻyxatdan oʻtish shabloni', 'user', 'U001'],
   ['Karimova Dilnoza Akmal qizi', 1, 'Yetakchi mutaxassis (YPX)', 'user', 'U002'],
   ['Aliyev Sardor Baxtiyor oʻgʻli', 1, 'Katta inspektor (PPX)', 'user', 'U003'],
   ['Rahimov Jasur Olim oʻgʻli', 2, 'Boʻlim boshligʻi', 'user', 'U004'],
@@ -18,20 +18,40 @@ export const USERS = [
 ];
 
 export function seedBase(repo, config) {
-  // Idempotent: bo'sh bazaga bir marta yoziladi
+  // Idempotent: tashkilotlar va boshlang'ich akkauntlar (admin + U001) bazada bo'lmasa avtomatik yaratiladi
   if (repo.countOrgs() === 0) ORGS.forEach((n) => repo.insertOrg(n));
+
+  const adminHash = hashPassword(config.adminPassword);
+  const includeDemoUsers = config.seedDemo || config.nodeEnv === 'test';
+  const empRaw = includeDemoUsers ? config.demoPassword : (config.employeePassword ?? (config.demoPassword || '12345678'));
+  const empHash = empRaw ? hashPassword(empRaw) : null;
+
   if (repo.countUsers() === 0) {
-    const adminHash = hashPassword(config.adminPassword);
-    const demoHash = config.demoPassword ? hashPassword(config.demoPassword) : null;
-    const includeDemoUsers = config.seedDemo || config.nodeEnv === 'test';
-    const list = includeDemoUsers ? USERS : USERS.filter(([, , , role]) => role === 'admin');
+    const list = includeDemoUsers ? USERS : USERS.filter(([, , , role, code]) => role === 'admin' || code === 'U001');
     for (const [name, org_id, pos, role, code] of list) {
-      repo.insertUser({ name, org_id, pos, role, code, password_hash: role === 'admin' ? adminHash : demoHash });
+      repo.insertUser({ name, org_id, pos, role, code, password_hash: role === 'admin' ? adminHash : empHash });
     }
+    return;
+  }
+
+  // Mavjud bazada boshlang'ich akkauntlar (admin va U001) nechta foydalanuvchi bo'lishidan qat'i nazar
+  // har doim mavjud va faol bo'lishini kafolatlaymiz
+  const admin = repo.userByCode('admin');
+  if (!admin) {
+    const [name, org_id, pos, role, code] = USERS.find(([, , , r]) => r === 'admin');
+    repo.insertUser({ name, org_id, pos, role, code, password_hash: adminHash });
   } else {
-    // admin paroli hali yo'q bo'lsa (masalan, eski baza) — env'dan o'rnatamiz
-    const admin = repo.userByCode('admin');
-    if (admin && !admin.password_hash) repo.setPassword(admin.id, hashPassword(config.adminPassword));
+    if (!admin.active) repo.setActive(admin.id, true);
+    if (!admin.password_hash) repo.setPassword(admin.id, adminHash);
+  }
+
+  const u001 = repo.userByCode('U001');
+  if (!u001) {
+    const [name, org_id, pos, role, code] = USERS.find(([, , , , c]) => c === 'U001');
+    repo.insertUser({ name, org_id, pos, role, code, password_hash: empHash });
+  } else {
+    if (!u001.active) repo.setActive(u001.id, true);
+    if (!u001.password_hash && empHash) repo.setPassword(u001.id, empHash);
   }
 }
 

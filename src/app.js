@@ -128,7 +128,7 @@ export function createApp({ config, db, logger = createLogger({ level: 'silent' 
     limitOrThrow(generalLimiter, state.ip, res);
 
     if (method === 'GET' && path === '/openapi.json') return send(res, 200, openapi);
-    const vm = /^\/attachments\/view\/([0-9a-f-]{36})$/i.exec(path);
+    const vm = /^\/attachments\/view\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(path);
     if ((method === 'GET' || method === 'HEAD') && vm) {
       const r = svc.serveViewTicket(vm[1]);
       return send(res, r.status, method === 'HEAD' ? Buffer.alloc(0) : r.body, r.headers, true);

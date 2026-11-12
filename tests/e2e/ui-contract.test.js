@@ -92,6 +92,7 @@ test('admin: login → dashboard → hujjatlar → yangi hujjat yaratish (XSS ek
     const b = browser(t.base, storage);
     const dash = await b.until((h) => h.includes('Salom,'));
     assert.match(dash, /Salom, Administrator/);
+    assert.match(dash, /Administrator paneli/);
     assert.match(dash, /Jami topshiriqlar/);
     assert.match(dash, /Yangi hujjat/);
     assert.match(dash, /Soʻnggi hujjatlar/);
@@ -134,13 +135,14 @@ test('admin: login → dashboard → hujjatlar → yangi hujjat yaratish (XSS ek
 test('oddiy xodim: "Yangi hujjat" tugmasi, ID ustuni va SMS bo‘limi ko‘rinmaydi', async () => {
   const t = await startTestApp({ demo: true, realClock: true });
   try {
-    const b = await openApp(t, 'U001', 'demopass1');
+    const b = await openApp(t, 'U004', 'demopass1');
     const dash = b.app();
-    assert.match(dash, /Salom, Omonjonov Fatxullo/);
+    assert.match(dash, /Salom, Rahimov Jasur/);
+    assert.match(dash, /Xodim paneli/);
     assert.ok(!dash.includes('Yangi hujjat'));
     await b.click({ a: 'go', p: 'users' });
     const users = await b.until((h) => h.includes('<h2>Xodimlar</h2>'));
-    assert.ok(!users.includes('<th>ID</th>'));
+    assert.ok(!users.includes('<th>ID / Login</th>'));
     await b.click({ a: 'go', p: 'set' });
     const set = await b.until((h) => h.includes('<h2>Sozlamalar</h2>'));
     assert.ok(!set.includes('SMS navbati'));
@@ -154,7 +156,7 @@ test('admin: ID ustuni va SMS provayder bo‘limi ko‘rinadi (demo SMS navbati 
   try {
     const adm = await openApp(t, 'admin', 'adminpass1');
     await adm.click({ a: 'go', p: 'users' });
-    assert.match(await adm.until((h) => h.includes('<h2>Xodimlar</h2>')), /<th>ID<\/th>/);
+    assert.match(await adm.until((h) => h.includes('<h2>Xodimlar</h2>')), /<th>ID \/ Login<\/th>/);
     await adm.click({ a: 'go', p: 'set' });
     const admSet = await adm.until((h) => h.includes('<h2>Sozlamalar</h2>'));
     assert.match(admSet, /SMS provayderini oʻrnatish/);
@@ -163,7 +165,7 @@ test('admin: ID ustuni va SMS provayder bo‘limi ko‘rinadi (demo SMS navbati 
     const op = await openApp(t, 'U002', 'demopass1');
     assert.match(op.app(), /Yangi hujjat/);
     await op.click({ a: 'go', p: 'users' });
-    assert.ok(!(await op.until((h) => h.includes('<h2>Xodimlar</h2>'))).includes('<th>ID</th>'));
+    assert.ok(!(await op.until((h) => h.includes('<h2>Xodimlar</h2>'))).includes('<th>ID / Login</th>'));
     await op.click({ a: 'go', p: 'set' });
     const opSet = await op.until((h) => h.includes('<h2>Sozlamalar</h2>'));
     assert.ok(!opSet.includes('SMS navbati'));
@@ -225,8 +227,9 @@ test('bajarildi tugmasi: xodim o‘z topshirig‘ini belgilaydi va holat yangila
   try {
     const admin = await t.tokenFor('admin');
     const today = todayIn('Asia/Tashkent');
-    const created = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-DONE', type: 'Xat', org_id: 1, deadline: addDays(today, 3), title: 'Bajarish', assignee: 1 } });
-    const b = await openApp(t, 'U001', 'demopass1');
+    const u4Id = t.repo.userByCode('U004').id;
+    const created = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-DONE', type: 'Xat', org_id: 1, deadline: addDays(today, 3), title: 'Bajarish', assignee: u4Id } });
+    const b = await openApp(t, 'U004', 'demopass1');
     await b.click({ a: 'doc', id: String(created.body.id) });
     const before = await b.until((h) => h.includes('№ UI-DONE'));
     assert.match(before, /✓ Bajarildi/);
@@ -272,10 +275,11 @@ test('dashboard: alohida filtrlar, xodim statistikasi va admin uchun o‘chirish
     assert.match(dash, /Xodimlar boʻyicha ijro statistikasi/);
     assert.match(dash, /Topshiriqlar va bajarilish holati/);
 
-    // Bitta xodimni tanlash (U001 = id 1)
-    await b.click({ a: 'pick-emp', uid: '1' });
+    // Bitta xodimni tanlash (U004)
+    const u4Id = String(t.repo.userByCode('U004').id);
+    await b.click({ a: 'pick-emp', uid: u4Id });
     const empDash = await b.until((h) => h.includes('Barcha xodimlarga qaytish'));
-    assert.match(empDash, /Omonjonov Fatxullo/);
+    assert.match(empDash, /Rahimov Jasur/);
 
     // Hujjat sahifasida admin uchun hujjat/topshiriq/vazifa o'chirish tugmalari bor
     await b.click({ a: 'doc', id: String(c.body.id) });
@@ -291,31 +295,32 @@ test('bildirishnoma: qo‘ng‘iroqcha ochilganda o‘qilgan bo‘ladi, tavsif b
   try {
     const admin = await t.tokenFor('admin');
     const today = todayIn('Asia/Tashkent');
-    const c = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-NTF', type: 'Xat', org_id: 1, deadline: addDays(today, 4), title: 'Bildirishnoma tavsifi', assignee: 1 } });
+    const u4Id = t.repo.userByCode('U004').id;
+    const c = await t.api('POST', '/documents', { token: admin, body: { number: 'UI-NTF', type: 'Xat', org_id: 1, deadline: addDays(today, 4), title: 'Bildirishnoma tavsifi', assignee: u4Id } });
     const aid = c.body.tasks[0].assignees[0].id;
 
-    const u1 = await openApp(t, 'U001', 'demopass1');
+    const u4 = await openApp(t, 'U004', 'demopass1');
     // Dastlab 1 ta o'qilmagan bildirishnoma bor
-    assert.match(u1.app(), /Bildirishnomalar/);
-    assert.equal((await t.api('GET', '/notifications/unread', { token: await t.tokenFor('U001') })).body.count, 1);
+    assert.match(u4.app(), /Bildirishnomalar/);
+    assert.equal((await t.api('GET', '/notifications/unread', { token: await t.tokenFor('U004') })).body.count, 1);
 
     // Qo'ng'iroqchani ochganda avtomatik o'qilgan deb belgilanadi (badge yo'qoladi)
-    await u1.click({ a: 'go', p: 'notif' });
-    const nPage = await u1.until((h) => h.includes('Bildirishnoma tavsifi'));
+    await u4.click({ a: 'go', p: 'notif' });
+    const nPage = await u4.until((h) => h.includes('Bildirishnoma tavsifi'));
     assert.match(nPage, new RegExp(`data-a="open-notif" data-doc="${c.body.id}"`));
-    assert.equal((await t.api('GET', '/notifications/unread', { token: await t.tokenFor('U001') })).body.count, 0);
+    assert.equal((await t.api('GET', '/notifications/unread', { token: await t.tokenFor('U004') })).body.count, 0);
 
     // Bildirishnoma tavsifiga bosilganda aynan o'sha hujjatga o'tadi va viewed_at qayd etiladi
-    await u1.click({ a: 'open-notif', doc: String(c.body.id) });
-    const docView = await u1.until((h) => h.includes('№ UI-NTF'));
+    await u4.click({ a: 'open-notif', doc: String(c.body.id) });
+    const docView = await u4.until((h) => h.includes('№ UI-NTF'));
     assert.match(docView, /Javob tavsifi \(majburiy\)/);
     assert.ok(t.repo.docById(c.body.id).tasks[0].assignees[0].viewed_at);
 
     // Javob fayli tanlanib tavsif yozilmasa, ogohlantirish chiqadi
-    u1.$(`#rf${aid}`).files = [{ name: 'test.txt', size: 10, type: 'text/plain' }];
-    u1.$(`#rn${aid}`).value = '   ';
-    await u1.click({ a: 'up-resp', aid: String(aid) });
-    assert.match(u1.alerts.at(-1), /tavsif yozish shart/i);
+    u4.$(`#rf${aid}`).files = [{ name: 'test.txt', size: 10, type: 'text/plain' }];
+    u4.$(`#rn${aid}`).value = '   ';
+    await u4.click({ a: 'up-resp', aid: String(aid) });
+    assert.match(u4.alerts.at(-1), /tavsif yozish shart/i);
   } finally { await t.close(); }
 });
 
@@ -367,5 +372,51 @@ test('veb-ilovadagi barcha API yo‘llari serverda mavjud (404 bermaydi)', async
       const m = t.app.routes.find((r) => r.method === method && new RegExp(`^${r.path.replace(/:key/g, '[^/]+').replace(/:\w+/g, '\\d+')}$`).test(`/${path}`));
       assert.ok(m, `${method} /${path} serverda yo‘q`);
     }
+  } finally { await t.close(); }
+});
+
+test('U001 shablon onboarding: dashboard yashiriladi, yangi xodim ro‘yxatdan o‘tadi, U001 saqlanadi, admin jadvalida chiqadi', async () => {
+  const t = await startTestApp({ demo: false, realClock: true });
+  try {
+    // 1. U001 bilan kirish -> dashboard yashirilib, majburiy ro'yxatdan o'tish oynasi ochiladi
+    const { storage } = await loginVia(t, 'U001', 'demopass1');
+    const b = browser(t.base, storage);
+    const modal = await b.until((h) => h.includes('Yangi xodimni roʻyxatdan oʻtkazish'));
+    assert.ok(!modal.includes('Jami topshiriqlar'));
+    assert.ok(!modal.includes('close-modal') && !modal.includes('close-gmodal'));
+
+    // 2. Band qilingan login ('admin' yoki 'U001') rad etiladi
+    b.$('#reg-name').value = 'Rustam Karimov';
+    b.$('#reg-pos').value = 'Moliya boʻlimi yetakchi mutaxassisi';
+    b.$('#reg-org').value = '1';
+    b.$('#reg-login').value = 'admin';
+    b.$('#reg-pw').value = 'parol1234';
+    b.$('#reg-pw2').value = 'parol1234';
+    await b.click({ a: 'register-emp' });
+    assert.match(b.$('#reg-err').textContent, /band qilingan/i);
+
+    // 3. Unikal login ('r_karimov') bilan ro'yxatdan o'tish -> yangi profilga kirib, shaxsiy dashboardga o'tadi
+    b.$('#reg-login').value = 'r_karimov';
+    await b.click({ a: 'register-emp' });
+    const empDash = await b.until((h) => h.includes('Salom, Rustam Karimov'));
+    assert.match(empDash, /Xodim paneli/);
+
+    // 4. U001 shabloni o'zgarmagan va faol; yangi xodim o'z logini bilan qayta kira oladi
+    const u001 = t.repo.userByCode('U001');
+    assert.ok(u001 && u001.active);
+    const secondLogin = await openApp(t, 'r_karimov', 'parol1234');
+    assert.match(secondLogin.app(), /Salom, Rustam Karimov/);
+
+    // 5. Admin panelida yangi xodim va yaratilgan vaqti ko'rinadi hamda topshiriqqa tanlanadi
+    const adm = await openApp(t, 'admin', 'adminpass1');
+    await adm.click({ a: 'go', p: 'users' });
+    const usersHtml = await adm.until((h) => h.includes('r_karimov'));
+    assert.match(usersHtml, /Rustam Karimov/);
+    assert.match(usersHtml, /Moliya boʻlimi yetakchi mutaxassisi/);
+    assert.match(usersHtml, /Roʻyxatdan oʻtgan/);
+
+    await adm.click({ a: 'go', p: 'new' });
+    const newDocHtml = await adm.until((h) => h.includes('<h2>Yangi hujjat</h2>'));
+    assert.match(newDocHtml, /Rustam Karimov/);
   } finally { await t.close(); }
 });

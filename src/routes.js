@@ -23,6 +23,15 @@ const schemas = {
     current_password: { type: 'string', minLength: 1, maxLength: 200, trim: false },
     new_password: { type: 'string', minLength: 8, maxLength: 200, trim: false },
   }, ['current_password', 'new_password']),
+  registerEmployee: obj({
+    full_name: { type: 'string', minLength: 2, maxLength: 200 },
+    position: { type: 'string', minLength: 2, maxLength: 200 },
+    login: { type: 'string', minLength: 2, maxLength: 64 },
+    password: { type: 'string', minLength: 8, maxLength: 200, trim: false },
+    password_confirm: { type: 'string', minLength: 1, maxLength: 200, trim: false },
+    org_id: id,
+    department: { type: 'string', maxLength: 200, nullable: true },
+  }, ['full_name', 'position', 'login', 'password']),
   docCreate: obj({
     number: { type: 'string', minLength: 1, maxLength: 50 },
     type: { type: 'string', enum: DOC_TYPES },
@@ -139,6 +148,11 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
       handler: ({ body, ctx }) => svc.changeOwnPassword(ctx, body),
     },
     {
+      method: 'POST', path: '/auth/register-employee', status: 201, tags: ['Autentifikatsiya'],
+      summary: 'U001 shabloni orqali yangi xodimni roʻyxatdan oʻtkazish va shaxsiy profilga kirish', body: schemas.registerEmployee,
+      handler: ({ body, ctx }) => svc.registerEmployee(ctx, body),
+    },
+    {
       method: 'GET', path: '/auth/me', tags: ['Autentifikatsiya'], summary: 'Joriy foydalanuvchi',
       handler: ({ user }) => svc.me(user),
     },
@@ -211,7 +225,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
       handler: ({ user, params }) => svc.downloadAttachment(user, params.id),
     },
     {
-      method: 'DELETE', path: '/attachments/:id', roles: ['admin'], tags: ['Fayllar'],
+      method: 'DELETE', path: '/attachments/:id', status: 204, roles: ['admin'], tags: ['Fayllar'],
       summary: 'Biriktirilgan faylni oʻchirish (faqat admin)',
       handler: ({ params, ctx }) => svc.deleteAttachment(ctx, params.id),
     },
@@ -345,7 +359,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
       handler: async ({ body, params, ctx }) => svc.saveIntegration(ctx, params.key, body),
     },
     {
-      method: 'DELETE', path: '/integrations/:key', status: 200, roles: ['admin'], tags: ['Integratsiya'], summary: 'Integratsiyani oʻchirish',
+      method: 'DELETE', path: '/integrations/:key', status: 204, roles: ['admin'], tags: ['Integratsiya'], summary: 'Integratsiyani oʻchirish',
       handler: ({ params, ctx }) => svc.deleteIntegration(ctx, params.key),
     },
 

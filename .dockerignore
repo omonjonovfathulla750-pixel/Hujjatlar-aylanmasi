@@ -1,5 +1,7 @@
 node_modules
 data
+build
+package-lock.json
 .env
 .git
 coverage

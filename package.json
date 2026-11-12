@@ -8,8 +8,9 @@
     "node": ">=22.13"
   },
   "scripts": {
+    "build": "node --disable-warning=ExperimentalWarning scripts/build.js",
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
-    "dev": "NODE_ENV=development node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"tests/**/*.test.js\"",
     "test:coverage": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=80 \"tests/**/*.test.js\"",
     "client": "node scripts/client-example.js",

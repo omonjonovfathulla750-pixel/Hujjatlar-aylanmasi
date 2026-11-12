@@ -37,10 +37,24 @@ docker compose --profile tools run --rm client
 ## Lokal ishga tushirish (Docker'siz)
 
 ```bash
+npm run build              # sintaksis, statik fayllar va API tekshiruvi
 npm start                  # NODE_ENV=development bo'lsa kalit/parol avtomatik (ogohlantirish bilan)
 npm run dev                # fayl o'zgarganda qayta ishga tushadi
 ```
-Dev rejimida standart: `admin / admin12345`, demo xodimlar (`U001`...`U008`) paroli `demo12345`.
+Standart boshlang'ich akkauntlar (server ishga tushganda avtomatik yaratiladi va doim faol saqlanadi):
+- Admin: `admin` / parol: `12345678` (roli: `admin`, production da `ADMIN_PASSWORD` bilan o'rnatiladi)
+- Yangi xodimlar uchun shablon kirish: `U001` / parol: `12345678` (`EMPLOYEE_PASSWORD` bilan sozlanadi). `U001` bilan kirgan yangi xodimga majburiy ro'yxatdan o'tish oynasi chiqadi va shaxsiy akkaunt yaratiladi; `U001` shabloni esa keyingi xodimlar uchun o'zgarishsiz qoladi.
+
+Ilova mobil brauzerlar hamda **Telegram Mini App (Web App)** ichida viewport va safe-area moslashuvi bilan ishlaydi.
+
+## Render.com da Deploy qilish
+
+> **Eslatma:** GitHub Pages faqat statik HTML/CSS/JS fayllarni ochadi (Node.js backend va SQLite bazasini ko'tara olmaydi, shu sababli `public/index.html` o'rniga `README.md` chiqib qolishi mumkin). Tizimni to'liq ishlatish uchun **Render.com** da Web Service sifatida joylashtiring.
+
+Loyiha ildizidagi [`render.yaml`](render.yaml) orqali Render Blueprint sifatida yoki qo'lda quyidagi sozlamalar bilan ishga tushiring:
+- **Build Command:** `npm run build`
+- **Start Command:** `npm start` (`src/server.js` `process.env.PORT || 3000` portida ishlaydi va `public/` papkasidan statik fayllarni uzatadi)
+- **Environment Variables:** `NODE_ENV=production`, `JWT_SECRET` (kamida 32 belgi), `ADMIN_PASSWORD=12345678`, `EMPLOYEE_PASSWORD=12345678`, `SEED_DEMO=false`, `TRUST_PROXY=true`
 
 ## API va token
 
@@ -131,14 +145,18 @@ Barchasi `.env.example` da izohlangan. Production'da `JWT_SECRET` va `ADMIN_PASS
 
 - **SQLite** bitta instans uchun. Bir nechta instans/yuqori yuk bo'lsa PostgreSQL ga o'ting (`repo.js` yagona SQL qatlami) va rate limitni Redis'ga ko'chiring.
 - Hujjatlar ro'yxatida holat bo'yicha filtr va sahifalash xotirada bajariladi (minglab hujjatgacha yaxshi).
-- Imzolash tartibi (`ord`) majburiy emas (namunadagidek); kerak bo'lsa `service.sign` ga qo'shiladi.
-- SMS provayderi va E-imzo/doc.iiv.uz integratsiyasi ulanmagan (SMS faqat navbatga yoziladi).
-- Foydalanuvchilarni boshqarish endpointi yo'q — hozircha `scripts/user-admin.js`.
-- Swagger UI skriptlari `cdn.jsdelivr.net` dan yuklanadi (oflayn muhitda `/docs` ochilmaydi, `openapi.json` ishlaydi).
+- Imzolash tartibi (`ord`) majburiy emas; kerak bo'lsa `service.sign` ga qo'shiladi.
+- SMS navbati (`sms_queue`) yoziladi; tashqi HTTP SMS provayderini (`Eskiz.uz`, `Playmobile`, maxsus HTTP API) Sozlamalar sahifasidan ulash va test qilish mumkin.
+- E-imzo / doc.iiv.uz API integratsiyasi UI formasiga emas, hozircha REST API (`/api/v1/integrations/doc_system`, `telegram_bot`, `email_provider`) orqali saqlanadi.
+- Swagger UI skriptlari `cdn.jsdelivr.net` dan yuklanadi (oflayn muhitda `/docs` ochilmaydi, `/api/v1/openapi.json` ishlaydi).
 
 ---
 
 ## v2.0.0 yangiliklari
+
+**Yangi xodim shablon onboarding tizimi (`U001`)**
+- `U001` shablon hisobi bilan kirganda yopib bo'lmaydigan majburiy ro'yxatdan o'tish oynasi ochiladi (`POST /auth/register-employee`)
+- Yangi shaxsiy login, parol, tashkilot va lavozim saqlanib alohida xodim akkaunti yaratiladi; `U001` keyingi yangi xodimlar uchun o'zgarishsiz qoladi
 
 **Topshiriq hayot sikli (Timeline)**
 - `GET /documents/:id/timeline` — har bir hujjat bo'yicha to'liq voqealar tarixi: kimga biriktirildi, qachon ko'rildi, kimga uzatildi, qachon yakunlandi
@@ -149,23 +167,19 @@ Barchasi `.env.example` da izohlangan. Production'da `JWT_SECRET` va `ADMIN_PASS
 - Biriktirilgandan ko'rgunga qadar o'tgan vaqt ko'rsatiladi (daqiqa/soat)
 
 **Xodim→Xodim uzatish (Delegatsiya)**
-- `POST /assignees/:id/delegate` — topshiriqni boshqa xodimga uzatish, izoh bilan
+- `POST /assignees/:id/delegate` — topshiriqni boshqa faol oddiy xodimga uzatish, izoh bilan (`U001`, admin, operator, viewer va o'ziga uzatish bloklangan)
 - `POST /assignees/:id/viewed` — ko'rilgan deb belgilash
 
-**Foydalanuvchi boshqaruvi (admin panelda)**
-- `POST /users` — yangi xodim qo'shish
-- `PATCH /users/:id` — ism, lavozim, rol, parol, bloklash/faollashtirish
+**Foydalanuvchi boshqaruvi (admin panelda va CLI)**
+- `POST /users`, `PATCH /users/:id`, `PATCH /users/:id/role`, `DELETE /users/:id` — yangi xodim qo'shish, tahrirlash, bloklash/faollashtirish, o'chirish
+- Qo'shimcha CLI: `scripts/user-admin.js`
 
 **Demo ma'lumotlarni tozalash**
-- `POST /admin/clear-demo` — barcha hujjatlar va tegishli ma'lumotlar o'chiriladi
-- Sozlamalar sahifasida tugma bilan
+- `POST /admin/clear-demo` — barcha hujjatlar va tegishli ma'lumotlar o'chiriladi (joriy adminning sessiya tokeni saqlanib qoladi)
 
-**Integratsiyalar (haqiqiy ulanish)**
-- `POST /integrations/sms_provider` — Eskiz.uz / Playmobile API ulash, test SMS yuborish
-- `POST /integrations/doc_system` — doc.iiv.uz API token ulash, ulanishni tekshirish
-- `POST /integrations/telegram_bot` — Telegram bot ulash, test xabar yuborish
-- `GET /integrations` — saqlangan sozlamalarni ko'rish
-- Sozlamalar sahifasida har bir integratsiya uchun forma va test tugmasi
+**Integratsiyalar va SSRF himoyasi**
+- `GET /integrations`, `POST /integrations/:key`, `DELETE /integrations/:key` — maxfiy token/parollar maskalanadi va lokal/ichki tarmoq manzillariga (SSRF) ruxsat berilmaydi
+- Sozlamalar sahifasida SMS provayderi (Eskiz.uz, Playmobile, Maxsus HTTP API) formasi va test SMS tugmasi mavjud
 
 **Bildirishnomalar**
 - Yangi topshiriq kelganda va delegatsiyada avtomatik bildirishnoma

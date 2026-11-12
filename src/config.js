@@ -25,7 +25,7 @@ export function loadConfig(env = process.env) {
   let adminPassword = env.ADMIN_PASSWORD;
   if (!adminPassword) {
     if (prod) throw new Error('ADMIN_PASSWORD majburiy (production)');
-    adminPassword = 'admin12345';
+    adminPassword = '12345678';
     warnings.push('ADMIN_PASSWORD berilmagan: dev uchun standart parol ishlatildi');
   }
   if (adminPassword.length < 8) throw new Error('ADMIN_PASSWORD kamida 8 belgi boʻlishi kerak');
@@ -34,9 +34,11 @@ export function loadConfig(env = process.env) {
   let demoPassword = env.DEMO_PASSWORD || '';
   if (seedDemo && !demoPassword) {
     if (prod) throw new Error('SEED_DEMO yoqilgan bo‘lsa DEMO_PASSWORD majburiy (production)');
-    demoPassword = 'demo12345';
+    demoPassword = '12345678';
     warnings.push('DEMO_PASSWORD berilmagan: dev uchun standart parol ishlatildi');
   }
+
+  const employeePassword = env.EMPLOYEE_PASSWORD ?? (demoPassword || '12345678');
 
   return {
     nodeEnv,
@@ -51,6 +53,7 @@ export function loadConfig(env = process.env) {
     refreshTtlSec: int(env.REFRESH_TOKEN_TTL_SEC, 7 * 86400),
     adminPassword,
     demoPassword,
+    employeePassword,
     seedDemo,
     corsOrigins: list(env.CORS_ORIGINS),
     trustProxy: bool(env.TRUST_PROXY, false),
