@@ -5,7 +5,7 @@ FROM node:22-alpine AS test
 WORKDIR /app
 ENV NODE_ENV=test
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
