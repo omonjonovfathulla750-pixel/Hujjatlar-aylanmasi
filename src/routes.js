@@ -1,4 +1,4 @@
-// Barcha API endpointlari bir joyda. Sxemalar validatsiya va OpenAPI hujjati uchun ishlatiladi.
+﻿// Barcha API endpointlari bir joyda. Sxemalar validatsiya va OpenAPI hujjati uchun ishlatiladi.
 import { Reply } from './errors.js';
 
 export const DOC_TYPES = ['Nazorat varaqasi', 'Xat', 'Buyruq', 'Farmoyish'];
@@ -380,7 +380,7 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     // ---- Bildirishnomalar ----
     {
       method: 'GET', path: '/notifications', tags: ['Bildirishnomalar'], summary: 'Bildirishnomalar roʻyxati',
-      handler: ({ user }) => ({ data: svc.listNotifications(user) }),
+      handler: async ({ user }) => ({ data: await svc.listNotifications(user) }),
     },
     {
       method: 'GET', path: '/notifications/unread', tags: ['Bildirishnomalar'], summary: 'Oʻqilmagan bildirishnomalar soni',
@@ -422,3 +422,4 @@ export function buildRoutes({ svc, repo, version, startedAt = Date.now() }) {
     },
   ];
 }
+

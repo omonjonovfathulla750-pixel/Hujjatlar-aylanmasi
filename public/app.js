@@ -1,4 +1,4 @@
-// ===== Ilova =====
+﻿// ===== Ilova =====
 const applyPrefs=()=>{
   if(typeof localStorage==='undefined')return;
   const th=localStorage.getItem('ui_theme');
@@ -498,16 +498,18 @@ ${isA()?`<div class="pn"><div class="bar"><h3 style="margin:0;flex:1">📱 SMS p
 <div id="sms-prov-msg"></div></div>`:''}`}
 
 // ---- Bildirishnomalar ----
-const notifDocId=n=>{if(n.doc_id)return n.doc_id;const m=/№\s*([^\s·]+)/.exec(n.title||'');const d=m&&S.docs.find(x=>x.number===m[1]);return d?d.id:''};
+const notifDocId=n=>{if(n.doc_id)return n.doc_id;const m=/№\s*([^\s·,]+)/.exec((n.title||'')+' '+(n.body||''));const d=m&&S.docs.find(x=>x.number===m[1]);return d?d.id:''};
+const notifMsg=n=>{const raw=(n.title||'')+(n.body?' — '+n.body:'');const m=/№\s*([^\s·,]+)/.exec(raw);if(n.type==='new_task'&&m)return`Sizga <b>№ ${esc(m[1])}</b> raqamli nazorat varaqasi biriktirildi`;if(m)return`${esc(n.title)} (<b>№ ${esc(m[1])}</b>)`;return esc(n.title||'Yangi bildirishnoma')};
 const notifV=()=>`<div class="bar"><h2>🔔 Bildirishnomalar</h2></div>
-<div class="notif-list" style="margin-top:12px">${S.notifications.length?S.notifications.map(n=>{const did=notifDocId(n);return`
-<div class="notif-item ${n._justRead?'unread':'read'}${did?' clickable':''}" ${did?`data-a="open-notif" data-doc="${did}"`:''}>
-  <div class="notif-icon">${n.type==='new_task'?'📋':n.type==='delegated'?'🔀':n.type==='response_file'?'📤':n.type==='file_uploaded'?'📎':'🔔'}</div>
-  <div class="notif-body">
-    <div class="notif-title">${esc(n.title)}</div>
-    ${n.body?`<div class="notif-text">${esc(n.body)}</div>`:''}
-    <div class="notif-time"><span>${fmt(n.created_at)}</span>${did?'<span class="notif-go">📄 Topshiriq hujjatiga oʻtish →</span>':''}</div>
+<div class="ios-notif-list">${Array.isArray(S.notifications)&&S.notifications.length?S.notifications.map(n=>{const did=notifDocId(n);return`
+<div class="ios-notif ${n._justRead?'unread':'read'}${did?' clickable':''}" ${did?`data-a="open-notif" data-doc="${did}"`:''}>
+  <div class="ios-notif-ic">${n.type==='new_task'?'📋':n.type==='delegated'?'🔀':n.type==='response_file'?'📤':n.type==='file_uploaded'?'📎':'🔔'}</div>
+  <div class="ios-notif-content">
+    <div class="ios-notif-top"><span class="ios-notif-app">HUJJAT AYLANISHI</span><span class="ios-notif-time">${fmt(n.created_at)}</span></div>
+    <div class="ios-notif-msg">${notifMsg(n)}</div>
+    ${n.body?`<div class="ios-notif-sub">${esc(n.body)}</div>`:''}
   </div>
+  ${n._justRead?'<span class="ios-notif-dot"></span>':''}
 </div>`}).join(''):'<p class="mut empty">Bildirishnomalar yo\u02bbq</p>'}
 </div>`;
 
@@ -577,8 +579,8 @@ document.addEventListener('click',async ev=>{
       if(S.page==='notif'){
         const r=await api('GET','notifications');
         if(!r.error){
-          S.notifications=r.data.map(n=>({...n,_justRead:!n.read}));
-          if(r.data.some(n=>!n.read)||S.unread>0){await api('POST','notifications/read-all');}
+          const list=Array.isArray(r.data)?r.data:[];S.notifications=list.map(n=>({...n,_justRead:!n.read}));
+          if(list.some(n=>!n.read)||S.unread>0){await api('POST','notifications/read-all');}
           S.unread=0;
         }
       }
@@ -885,3 +887,4 @@ function loginUI(){$('#app').innerHTML='<div class="lgn pn"><h1>Hujjat aylanish 
   }
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&tok()&&!S.me?.onboarding_required){loadUnread();load({silent:true,renderIfChanged:true});}});
 })();
+

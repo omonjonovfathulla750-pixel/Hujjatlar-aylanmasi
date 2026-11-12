@@ -1,0 +1,18 @@
+﻿
+/* ---- iOS / iPhone Style Notifications ---- */
+.ios-notif-list{display:flex;flex-direction:column;gap:10px;max-width:680px;margin-top:14px}
+.ios-notif{position:relative;display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:18px;background:rgba(255,255,255,0.06);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);box-shadow:0 8px 24px rgba(0,0,0,0.22);transition:transform .16s ease,background .16s ease,border-color .16s ease}
+body.light .ios-notif{background:rgba(255,255,255,0.82);border:1px solid rgba(44,30,22,0.1);box-shadow:0 6px 20px rgba(44,30,22,0.07)}
+.ios-notif.clickable{cursor:pointer}
+.ios-notif.clickable:hover{transform:translateY(-2px);background:rgba(229,169,60,0.12);border-color:rgba(229,169,60,0.45)}
+.ios-notif.clickable:active{transform:scale(0.985)}
+.ios-notif.unread{border-color:rgba(229,169,60,0.5);background:rgba(229,169,60,0.09)}
+.ios-notif-ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;background:linear-gradient(135deg,rgba(229,169,60,0.25),rgba(16,185,129,0.2));border:1px solid rgba(255,255,255,0.12)}
+.ios-notif-content{flex:1;min-width:0}
+.ios-notif-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:3px}
+.ios-notif-app{font-size:10px;font-weight:700;letter-spacing:.06em;opacity:.6;text-transform:uppercase}
+.ios-notif-time{font-size:11px;opacity:.55;white-space:nowrap}
+.ios-notif-msg{font-size:14px;line-height:1.4;font-weight:500}
+.ios-notif-msg b{color:var(--ac,#e5a93c);font-weight:700}
+.ios-notif-sub{font-size:12.5px;opacity:.72;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ios-notif-dot{width:9px;height:9px;border-radius:50%;background:#3b82f6;box-shadow:0 0 8px #3b82f6;flex-shrink:0}
