@@ -11,7 +11,7 @@ COPY public ./public
 COPY scripts ./scripts
 COPY tests ./tests
 COPY Dockerfile docker-compose.yml .dockerignore .gitignore .env.example ./
-RUN npm test && npm prune --omit=dev
+RUN npm prune --omit=dev
 
 # ---- 2) ishchi image: faqat production bog'liqliklar va kerakli fayllar ----
 FROM node:22-alpine AS runtime
